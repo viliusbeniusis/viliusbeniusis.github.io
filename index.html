@@ -1,0 +1,2869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+  <title>PPL Logger</title>
+
+  <!-- PWA meta -->
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="PPL"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="theme-color" content="#111113"/>
+
+  <!-- Icons — iOS requires real PNG files, not data URIs -->
+  <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png"/>
+  <link rel="apple-touch-icon" sizes="152x152" href="icon-152.png"/>
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png"/>
+
+  <!-- Splash screen colours for iOS -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <style>body{background:#111113}</style>
+
+  <!-- Web App Manifest -->
+  <link rel="manifest" href="manifest.json"/>
+  <script>
+    // Register inline Service Worker for offline caching
+    if('serviceWorker' in navigator){
+      const swCode=`
+        const CACHE='ppl-logger-v1';
+        const URLS=[
+          self.location.href.replace(/\\/sw\\.js.*/,''),
+          'https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js',
+          'https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js'
+        ];
+        self.addEventListener('install',e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(URLS).catch(()=>{})).then(()=>self.skipWaiting()));});
+        self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()));});
+        self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request).then(res=>{if(res.ok){const c=res.clone();caches.open(CACHE).then(ca=>ca.put(e.request,c));}return res;}).catch(()=>r)));});
+      `;
+      const blob=new Blob([swCode],{type:'application/javascript'});
+      const url=URL.createObjectURL(blob);
+      navigator.serviceWorker.register(url,{scope:'/'}).catch(()=>{});
+    }
+  </script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%}
+    body{font-family:-apple-system,'Helvetica Neue',sans-serif;-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent;overscroll-behavior:none}
+    #root{height:100%}
+    .safe-top{padding-top:max(18px,env(safe-area-inset-top))}
+    .safe-bottom{padding-bottom:max(12px,env(safe-area-inset-bottom))}
+    .scroll{overflow-y:auto;-webkit-overflow-scrolling:touch}
+    button{touch-action:manipulation}
+    input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+    input[type=number]{-moz-appearance:textfield}
+    /* Tab fade transitions */
+    .tab-enter{animation:tabFadeIn 0.15s ease forwards}
+    @keyframes tabFadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+  </style>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useRef,useMemo,createContext,useContext,useCallback}=React;
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const ACCENTS=[
+  {id:"sport",  label:"Sport",     push:"#f97316",pull:"#3b82f6",legs:"#22c55e",acc:"#f97316",vol:"#3b82f6",str:"#f97316",dld:"#22c55e",peak:"#a855f7"},
+  {id:"fire",   label:"Fire",      push:"#ef4444",pull:"#f97316",legs:"#eab308",acc:"#ef4444",vol:"#ef4444",str:"#f97316",dld:"#22c55e",peak:"#a855f7"},
+  {id:"ocean",  label:"Ocean",     push:"#0ea5e9",pull:"#6366f1",legs:"#14b8a6",acc:"#0ea5e9",vol:"#6366f1",str:"#0ea5e9",dld:"#14b8a6",peak:"#8b5cf6"},
+  {id:"mono",   label:"Monochrome",push:"#6b7280",pull:"#374151",legs:"#9ca3af",acc:"#374151",vol:"#374151",str:"#6b7280",dld:"#9ca3af",peak:"#1f2937"},
+  {id:"neon",   label:"Neon",      push:"#f0abfc",pull:"#67e8f9",legs:"#86efac",acc:"#f0abfc",vol:"#67e8f9",str:"#f0abfc",dld:"#86efac",peak:"#c4b5fd"},
+  {id:"sunset", label:"Sunset",    push:"#fb7185",pull:"#fb923c",legs:"#fbbf24",acc:"#fb7185",vol:"#fb923c",str:"#fb7185",dld:"#fbbf24",peak:"#e879f9"},
+];
+function buildTheme(mode,accentId){
+  const a=ACCENTS.find(x=>x.id===accentId)||ACCENTS[0];
+  const dk=mode==="dark";
+  return{mode,accent:a,
+    bg:dk?"#111113":"#f2f2f7",bgCard:dk?"#1c1c1e":"#fff",bgInput:dk?"#2c2c2e":"#f2f2f7",
+    bgHeader:dk?"#1c1c1e":"#fff",bgInset:dk?"#0d0d0f":"#f9f9fb",bgRow:dk?"#242426":"transparent",
+    border:dk?"#2c2c2e":"#e5e5ea",borderMid:dk?"#3a3a3c":"#f2f2f7",
+    text:dk?"#f2f2f7":"#1c1c1e",textSub:"#8e8e93",textMuted:dk?"#48484a":"#9e9ea8",
+    textPlaceholder:dk?"#48484a":"#8e8e93",
+    backBtn:dk?"#0a84ff":"#007aff",shadow:dk?"none":"0 1px 4px rgba(0,0,0,0.08)",
+    inputDone:dk?"#f2f2f7":"#1c1c1e",inputUndone:dk?"#48484a":"#9e9ea8",
+    // Design tokens — two radii, used throughout
+    r16:16,r10:10,
+  };
+}
+const ThemeCtx=createContext(buildTheme("light","sport"));
+const useTheme=()=>useContext(ThemeCtx);
+
+// ─── PHASE DATA ───────────────────────────────────────────────────────────────
+const PHASE_DEFS=[
+  {weeks:[1,2,3,4],    name:"Accumulation",      type:"vol", phaseKey:"accumulation"},
+  {weeks:[5,6,7,8],    name:"Intensification",   type:"str", phaseKey:"intensification"},
+  {weeks:[9],          name:"Deload",             type:"dld", phaseKey:"deload"},
+  {weeks:[10],         name:"Peak Week",          type:"peak",phaseKey:"peak"},
+  {weeks:[11,12,13,14],name:"Accumulation II",   type:"vol", phaseKey:"accumulation"},
+  {weeks:[15,16,17,18],name:"Intensification II",type:"str", phaseKey:"intensification"},
+  {weeks:[19],         name:"Deload",             type:"dld", phaseKey:"deload"},
+  {weeks:[20],         name:"Peak Week",          type:"peak",phaseKey:"peak"},
+];
+// Build phase objects with accent-driven colours — memoised per accent in consumers
+function buildPhases(accent){
+  return PHASE_DEFS.map(p=>({...p,color:accent[p.type]}));
+}
+function getPhase(w,phases){
+  return phases.find(p=>p.weeks.includes(w))||phases[0];
+}
+
+// ─── EXERCISE DATA ────────────────────────────────────────────────────────────
+const W1={
+  push:{
+    "Barbell Bench Press":               [82.5,87.5,92.5,100,95,102.5,107.5,110,65,117.5,85,90,95,102.5,100,105,110,115,70,127.5],
+    "Barbell Shoulder Press":            [45,50,52.5,55,52.5,57.5,60,62.5,35,65,47.5,50,52.5,57.5,55,57.5,62.5,62.5,37.5,70],
+    "Cable Standing Chest Press":        [35,37.5,40,42.5,42.5,45,47.5,50,27.5,52.5,37.5,40,42.5,45,45,47.5,50,52.5,30,57.5],
+    "Cable Tricep Pushdown (Single Arm)":[11.25,12.5,13.75,15,13.75,15,16.25,16.25,8.75,17.5,11.25,12.5,13.75,15,13.75,15,16.25,17.5,8.75,18.75],
+    "Cable Bent-Over Tricep Extension":  [17.5,18.75,20,21.25,21.25,22.5,23.75,25,13.75,26.25,18.75,20,21.25,22.5,22.5,23.75,25,26.25,15,28.75],
+    "Dumbbell Lateral Raise":            [9,9,10,11,10,11,12,12,7,13,9,10,10,11,11,11,12,12,8,14],
+  },
+  pull:{
+    "Machine Lat Pulldown":              [62.5,67.5,70,75,75,80,85,87.5,52.5,95,62.5,67.5,72.5,77.5,77.5,82.5,87.5,90,55,102.5],
+    "Cable Seated Row":                  [65,70,75,80,80,85,90,92.5,55,102.5,67.5,72.5,77.5,82.5,82.5,87.5,92.5,97.5,57.5,110],
+    "Cable Pullover with Rope":          [27.5,30,32.5,32.5,32.5,35,37.5,37.5,22.5,42.5,27.5,30,32.5,35,35,37.5,37.5,40,25,45],
+    "Dumbbell Preacher Curl":            [16.25,17.5,18.75,20,20,21.25,22.5,23.75,13.75,25,17.5,18.75,20,21.25,21.25,22.5,23.75,23.75,15,27.5],
+    "Barbell Reverse Curl":              [26.25,27.5,30,32.5,32.5,33.75,36.25,36.25,22.5,40,26.25,28.75,31.25,32.5,32.5,35,36.25,37.5,22.5,42.5],
+    "Dumbbell Lateral Raise (Rear Delt)":[8,9,9,10,10,11,11,12,7,13,8,9,10,10,10,11,12,12,7,14],
+    "Machine Seated Reverse Fly":        [17.5,20,20,22.5,22.5,25,25,25,15,27.5,20,20,22.5,22.5,22.5,25,25,27.5,15,30],
+  },
+  legs:{
+    "Sled 45° Leg Press":           [200,215,230,245,245,260,275,280,165,305,205,220,235,250,250,265,280,290,175,325],
+    "Machine Single Leg Extension": [35,37.5,40,42.5,42.5,45,47.5,50,30,52.5,35,37.5,40,42.5,42.5,47.5,50,50,30,57.5],
+    "Machine Standing Leg Curl":    [17.5,17.5,20,22.5,22.5,22.5,25,25,15,27.5,17.5,20,20,22.5,22.5,22.5,25,25,15,27.5],
+    "Smith Machine Calf Raise":     [75,80,85,90,90,95,100,105,60,110,75,80,85,90,90,95,105,105,65,120],
+    "Machine Seated Hip Adduction": [50,55,57.5,62.5,62.5,65,70,70,42.5,77.5,52.5,55,60,62.5,62.5,67.5,70,72.5,45,82.5],
+    "Machine Seated Hip Abduction": [40,45,47.5,50,50,52.5,57.5,57.5,35,62.5,42.5,45,47.5,52.5,52.5,55,57.5,60,35,67.5],
+  },
+};
+
+const BASE_EX={
+  push:[
+    {name:"Barbell Bench Press",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:1},reps:{accumulation:"6–10",intensification:"4–6",deload:"8–10",peak:"1–3"}},
+    {name:"Barbell Shoulder Press",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–10",intensification:"5–7",deload:"10",peak:"5"}},
+    {name:"Cable Standing Chest Press",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"12",intensification:"10–12",deload:"12",peak:"12"}},
+    {name:"Cable Tricep Pushdown (Single Arm)",type:"isolation",sets:{accumulation:4,intensification:4,deload:2,peak:2},reps:{accumulation:"8–10",intensification:"6–8",deload:"12",peak:"10"}},
+    {name:"Cable Bent-Over Tricep Extension",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12",intensification:"10–12",deload:"12",peak:"12"}},
+    {name:"Dumbbell Lateral Raise",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"10–12",deload:"12",peak:"12"}},
+  ],
+  pull:[
+    {name:"Machine Lat Pulldown",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–10",intensification:"6–8",deload:"10",peak:"8"}},
+    {name:"Cable Seated Row",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"8"}},
+    {name:"Cable Pullover with Rope",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12",intensification:"10–12",deload:"12",peak:"12"}},
+    {name:"Dumbbell Preacher Curl",type:"isolation",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–12",intensification:"6–8",deload:"12",peak:"10"}},
+    {name:"Barbell Reverse Curl",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12",intensification:"10–12",deload:"12",peak:"12"}},
+    {name:"Dumbbell Lateral Raise (Rear Delt)",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"12",intensification:"12",deload:"12",peak:"12"}},
+    {name:"Machine Seated Reverse Fly",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12",intensification:"12",deload:"12",peak:"12"}},
+  ],
+  legs:[
+    {name:"Sled 45° Leg Press",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–10",intensification:"6–8",deload:"10",peak:"6–8"}},
+    {name:"Machine Single Leg Extension",type:"isolation",sets:{accumulation:4,intensification:4,deload:2,peak:2},reps:{accumulation:"8–12",intensification:"6–10",deload:"12",peak:"10"}},
+    {name:"Machine Standing Leg Curl",type:"isolation",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Smith Machine Calf Raise",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Machine Seated Hip Adduction",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"12"}},
+    {name:"Machine Seated Hip Abduction",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"10–12",deload:"15",peak:"12"}},
+  ],
+};
+
+const S2_EX={
+  push:[
+    {name:"Incline Dumbbell Press",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–12",intensification:"6–8",deload:"10–12",peak:"6–8"}},
+    {name:"Dumbbell Shoulder Press",type:"compound",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"8–10"}},
+    {name:"Cable Crossover (Low)",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+    {name:"Overhead Tricep Extension (Cable)",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Dumbbell Kickback",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+    {name:"Cable Lateral Raise",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+  ],
+  pull:[
+    {name:"Underhand Lat Pulldown",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"8–10"}},
+    {name:"Dumbbell Single Arm Row",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"8–10"}},
+    {name:"Straight Arm Pulldown",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+    {name:"Dumbbell Hammer Curl",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Cable Curl (EZ-bar)",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Face Pull (Rope)",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"15",intensification:"12–15",deload:"15",peak:"12"}},
+    {name:"Incline Dumbbell Rear Delt Raise",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+  ],
+  legs:[
+    {name:"Hack Squat (Smith Machine)",type:"compound",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"8–12",intensification:"6–8",deload:"10",peak:"6–8"}},
+    {name:"Bulgarian Split Squat",type:"compound",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"10–12",peak:"8–10"}},
+    {name:"Lying Leg Curl",type:"isolation",sets:{accumulation:3,intensification:4,deload:2,peak:2},reps:{accumulation:"10–12",intensification:"8–10",deload:"12",peak:"10"}},
+    {name:"Seated Calf Raise",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:2},reps:{accumulation:"12–15",intensification:"10–12",deload:"15",peak:"12"}},
+    {name:"Cable Pull-Through",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"12",deload:"15",peak:"12"}},
+    {name:"Machine Seated Hip Abduction",type:"isolation",sets:{accumulation:3,intensification:3,deload:2,peak:1},reps:{accumulation:"12–15",intensification:"10–12",deload:"15",peak:"12"}},
+  ],
+};
+
+// S2 weight mappings — each S2 exercise derives from a S1 source at a given factor
+const S2_MAP={
+  push:[
+    {s2:"Incline Dumbbell Press",           src:"Barbell Bench Press",                factor:0.40,inc:1.25},
+    {s2:"Dumbbell Shoulder Press",          src:"Barbell Shoulder Press",             factor:0.45,inc:1.25},
+    {s2:"Cable Crossover (Low)",            src:"Cable Standing Chest Press",         factor:0.80,inc:2.5 },
+    {s2:"Overhead Tricep Extension (Cable)",src:"Cable Bent-Over Tricep Extension",   factor:0.90,inc:1.25},
+    {s2:"Dumbbell Kickback",                src:"Cable Tricep Pushdown (Single Arm)", factor:0.55,inc:1.25},
+    {s2:"Cable Lateral Raise",              src:"Dumbbell Lateral Raise",             factor:1.00,inc:1.25},
+  ],
+  pull:[
+    {s2:"Underhand Lat Pulldown",           src:"Machine Lat Pulldown",               factor:0.95,inc:2.5 },
+    {s2:"Dumbbell Single Arm Row",          src:"Cable Seated Row",                   factor:0.50,inc:1.25},
+    {s2:"Straight Arm Pulldown",            src:"Cable Pullover with Rope",           factor:0.85,inc:2.5 },
+    {s2:"Dumbbell Hammer Curl",             src:"Dumbbell Preacher Curl",             factor:1.00,inc:1.25},
+    {s2:"Cable Curl (EZ-bar)",              src:"Dumbbell Preacher Curl",             factor:1.30,inc:2.5 },
+    {s2:"Face Pull (Rope)",                 src:"Machine Seated Reverse Fly",         factor:1.10,inc:2.5 },
+    {s2:"Incline Dumbbell Rear Delt Raise", src:"Dumbbell Lateral Raise (Rear Delt)", factor:0.80,inc:1.25},
+  ],
+  legs:[
+    {s2:"Hack Squat (Smith Machine)",       src:"Sled 45° Leg Press",                factor:0.35,inc:2.5 },
+    {s2:"Bulgarian Split Squat",            src:"Sled 45° Leg Press",                factor:0.09,inc:1.25},
+    {s2:"Lying Leg Curl",                   src:"Machine Standing Leg Curl",          factor:0.95,inc:2.5 },
+    {s2:"Seated Calf Raise",                src:"Smith Machine Calf Raise",           factor:0.55,inc:2.5 },
+    {s2:"Cable Pull-Through",               src:"Sled 45° Leg Press",                factor:0.18,inc:2.5 },
+    {s2:"Machine Seated Hip Abduction",     src:"Machine Seated Hip Abduction",       factor:1.00,inc:2.5 },
+  ],
+};
+
+const MUSCLES=["push","pull","legs"];
+
+function getMeta(accent){
+  return{
+    "push-1":{label:"Push 1",muscle:"push",slot:1,color:accent.push,isS2:false,exercises:BASE_EX.push},
+    "push-2":{label:"Push 2",muscle:"push",slot:2,color:accent.push,isS2:true, exercises:S2_EX.push},
+    "pull-1":{label:"Pull 1",muscle:"pull",slot:1,color:accent.pull,isS2:false,exercises:BASE_EX.pull},
+    "pull-2":{label:"Pull 2",muscle:"pull",slot:2,color:accent.pull,isS2:true, exercises:S2_EX.pull},
+    "legs-1":{label:"Legs 1",muscle:"legs",slot:1,color:accent.legs,isS2:false,exercises:BASE_EX.legs},
+    "legs-2":{label:"Legs 2",muscle:"legs",slot:2,color:accent.legs,isS2:true, exercises:S2_EX.legs},
+  };
+}
+
+// ─── WEIGHT CALCULATION ───────────────────────────────────────────────────────
+const epley=(w,r)=>w*(1+r/30);
+const roundTo=(v,inc)=>Math.round(v/inc)*inc;
+
+const INC={"Barbell Bench Press":2.5,"Barbell Shoulder Press":2.5,"Cable Standing Chest Press":2.5,"Cable Tricep Pushdown (Single Arm)":1.25,"Cable Bent-Over Tricep Extension":1.25,"Dumbbell Lateral Raise":1,"Machine Lat Pulldown":2.5,"Cable Seated Row":2.5,"Cable Pullover with Rope":2.5,"Dumbbell Preacher Curl":1.25,"Barbell Reverse Curl":1.25,"Dumbbell Lateral Raise (Rear Delt)":1,"Machine Seated Reverse Fly":2.5,"Sled 45° Leg Press":5,"Machine Single Leg Extension":2.5,"Machine Standing Leg Curl":2.5,"Smith Machine Calf Raise":5,"Machine Seated Hip Adduction":2.5,"Machine Seated Hip Abduction":2.5};
+// Week percentages of 1RM across 20 weeks
+// Starts at 65% in accumulation (more appropriate for isolation work at the gym)
+// Peaks at 100% in week 10, then repeats with slightly higher ceiling in block 2
+const WEEK_PCTS=[0.65,0.70,0.75,0.80,0.80,0.85,0.90,0.92,0.55,1.00,0.67,0.72,0.77,0.82,0.82,0.87,0.92,0.95,0.57,1.075];
+
+function buildWeightsFromMaxes(maxes){
+  const out={push:{},pull:{},legs:{}};
+  Object.entries(maxes).forEach(([exName,{weight,reps,muscle}])=>{
+    if(!weight||!reps||!muscle)return;
+    const orm=epley(parseFloat(weight),parseFloat(reps));
+    out[muscle][exName]=WEEK_PCTS.map(pct=>roundTo(orm*pct,INC[exName]||2.5));
+  });
+  return out;
+}
+
+function buildW2(w1Source){
+  const out={push:{},pull:{},legs:{}};
+  for(const [muscle,mappings] of Object.entries(S2_MAP)){
+    for(const m of mappings){
+      const src=w1Source[muscle]?.[m.src];
+      out[muscle][m.s2]=src?src.map(w=>roundTo(w*m.factor,m.inc)):Array(20).fill(0);
+    }
+  }
+  return out;
+}
+
+const DEFAULT_MAXES={
+  "Barbell Bench Press":                {muscle:"push",weight:100, reps:5},
+  "Barbell Shoulder Press":             {muscle:"push",weight:50,  reps:9},
+  "Cable Standing Chest Press":         {muscle:"push",weight:40,  reps:12},
+  "Cable Tricep Pushdown (Single Arm)": {muscle:"push",weight:12.5,reps:12},
+  "Cable Bent-Over Tricep Extension":   {muscle:"push",weight:20,  reps:12},
+  "Dumbbell Lateral Raise":             {muscle:"push",weight:9,   reps:12},
+  "Machine Lat Pulldown":               {muscle:"pull",weight:75,  reps:8},
+  "Cable Seated Row":                   {muscle:"pull",weight:80,  reps:8},
+  "Cable Pullover with Rope":           {muscle:"pull",weight:30,  reps:12},
+  "Dumbbell Preacher Curl":             {muscle:"pull",weight:20,  reps:8},
+  "Barbell Reverse Curl":               {muscle:"pull",weight:30,  reps:10},
+  "Dumbbell Lateral Raise (Rear Delt)": {muscle:"pull",weight:9,   reps:12},
+  "Machine Seated Reverse Fly":         {muscle:"pull",weight:20,  reps:12},
+  "Sled 45° Leg Press":                {muscle:"legs",weight:240, reps:8},
+  "Machine Single Leg Extension":      {muscle:"legs",weight:40,  reps:10},
+  "Machine Standing Leg Curl":         {muscle:"legs",weight:20,  reps:10},
+  "Smith Machine Calf Raise":          {muscle:"legs",weight:80,  reps:12},
+  "Machine Seated Hip Adduction":      {muscle:"legs",weight:55,  reps:12},
+  "Machine Seated Hip Abduction":      {muscle:"legs",weight:45,  reps:12},
+};
+
+// ─── SUBSTITUTIONS ────────────────────────────────────────────────────────────
+// Each entry: { name, factor, inc }
+// factor is relative to the source exercise's programmed weight for that week.
+// inc is rounding increment in kg.
+const SUBS={
+  // ── PUSH S1 ──
+  "Barbell Bench Press":[
+    {name:"Dumbbell Bench Press",        factor:0.42,inc:1.25, note:"Each DB — slightly harder to stabilise"},
+    {name:"Smith Machine Bench Press",   factor:0.95,inc:2.5,  note:"Fixed path — similar load to barbell"},
+    {name:"Chest Press Machine",         factor:0.85,inc:5,    note:"Machine — easier setup, same stimulus"},
+  ],
+  "Barbell Shoulder Press":[
+    {name:"Dumbbell Shoulder Press",     factor:0.45,inc:1.25, note:"Each DB — same pattern, unilateral stability"},
+    {name:"Smith Machine Shoulder Press",factor:0.90,inc:2.5,  note:"Fixed path — matches barbell load closely"},
+    {name:"Cable Shoulder Press",        factor:0.80,inc:2.5,  note:"Cable — constant tension variation"},
+  ],
+  "Cable Standing Chest Press":[
+    {name:"Pec Deck Machine",            factor:0.90,inc:5,    note:"Machine fly — similar isolation load"},
+    {name:"Dumbbell Flye",               factor:0.30,inc:1.25, note:"Each DB — lighter due to leverage"},
+    {name:"Resistance Band Chest Press", factor:0.70,inc:2.5,  note:"Band — use nearest weight equivalent"},
+  ],
+  "Cable Tricep Pushdown (Single Arm)":[
+    {name:"Tricep Pushdown (Bar)",       factor:1.80,inc:1.25, note:"Two arms — roughly 1.8× single arm"},
+    {name:"Dumbbell Overhead Tricep Ext",factor:0.50,inc:1.25, note:"Each DB — lighter due to leverage"},
+    {name:"Tricep Dips (assisted)",      factor:1.00,inc:5,    note:"Bodyweight — set to assisted load"},
+  ],
+  "Cable Bent-Over Tricep Extension":[
+    {name:"Skull Crushers (EZ Bar)",     factor:0.90,inc:1.25, note:"Bar weight — similar tricep stress"},
+    {name:"Dumbbell Kickback",           factor:0.30,inc:1.25, note:"Each DB — short moment arm, go lighter"},
+    {name:"Rope Overhead Extension",     factor:0.85,inc:1.25, note:"Cable overhead — same as current but vertical"},
+  ],
+  "Dumbbell Lateral Raise":[
+    {name:"Cable Lateral Raise",         factor:1.00,inc:1.25, note:"Cable — same load, constant tension"},
+    {name:"Machine Lateral Raise",       factor:1.10,inc:2.5,  note:"Machine — slightly stronger at peak"},
+    {name:"Band Lateral Raise",          factor:0.80,inc:1,    note:"Band — use nearest equivalent"},
+  ],
+  // ── PULL S1 ──
+  "Machine Lat Pulldown":[
+    {name:"Cable Lat Pulldown",          factor:1.00,inc:2.5,  note:"Cable — identical movement and load"},
+    {name:"Assisted Pull-Up",            factor:0.90,inc:5,    note:"Bodyweight assist — set counterweight"},
+    {name:"Seated Cable Row (wide grip)",factor:0.90,inc:2.5,  note:"Wide grip row — shifts emphasis to lats"},
+  ],
+  "Cable Seated Row":[
+    {name:"Machine Seated Row",          factor:1.00,inc:5,    note:"Machine — same stimulus, different setup"},
+    {name:"Dumbbell Bent-Over Row",      factor:0.50,inc:1.25, note:"Each DB — per arm, matches row strength"},
+    {name:"T-Bar Row",                   factor:0.70,inc:2.5,  note:"T-bar — compound, slightly lower load"},
+  ],
+  "Cable Pullover with Rope":[
+    {name:"Dumbbell Pullover",           factor:0.80,inc:1.25, note:"DB — single weight, slightly lighter"},
+    {name:"Machine Pullover",            factor:1.00,inc:5,    note:"Machine — similar total load"},
+    {name:"Straight Arm Pulldown (bar)", factor:0.90,inc:2.5,  note:"Bar attachment — slightly different angle"},
+  ],
+  "Dumbbell Preacher Curl":[
+    {name:"Machine Preacher Curl",       factor:1.10,inc:2.5,  note:"Machine — slight mechanical advantage"},
+    {name:"Barbell Preacher Curl",       factor:1.80,inc:1.25, note:"Bar total — two arms vs one DB"},
+    {name:"Concentration Curl",          factor:1.00,inc:1.25, note:"DB — same load, different stability"},
+  ],
+  "Barbell Reverse Curl":[
+    {name:"Cable Reverse Curl",          factor:1.00,inc:1.25, note:"Cable — same load, constant tension"},
+    {name:"Dumbbell Reverse Curl",       factor:0.50,inc:1.25, note:"Each DB — per arm"},
+    {name:"Hammer Curl (Barbell)",       factor:1.05,inc:1.25, note:"Neutral grip — similar brachialis load"},
+  ],
+  "Dumbbell Lateral Raise (Rear Delt)":[
+    {name:"Cable Rear Delt Fly",         factor:0.90,inc:1.25, note:"Cable — similar rear delt load"},
+    {name:"Machine Rear Delt Fly",       factor:1.10,inc:2.5,  note:"Machine — slightly stronger position"},
+    {name:"Face Pull (light)",           factor:1.20,inc:2.5,  note:"Face pull — broader rear delt stimulus"},
+  ],
+  "Machine Seated Reverse Fly":[
+    {name:"Cable Reverse Fly",           factor:0.90,inc:2.5,  note:"Cable — similar total load"},
+    {name:"Dumbbell Rear Delt Raise",    factor:0.45,inc:1.25, note:"Each DB — lighter due to leverage"},
+    {name:"Band Pull-Apart",             factor:0.60,inc:2.5,  note:"Band — use nearest equivalent"},
+  ],
+  // ── LEGS S1 ──
+  "Sled 45° Leg Press":[
+    {name:"Hack Squat (Machine)",        factor:0.40,inc:5,    note:"Machine hack squat — much harder leverage"},
+    {name:"Goblet Squat",                factor:0.12,inc:2.5,  note:"Single DB — limited by upper body hold"},
+    {name:"Smith Machine Squat",         factor:0.35,inc:2.5,  note:"Smith squat — fixed path, go lighter"},
+  ],
+  "Machine Single Leg Extension":[
+    {name:"Leg Extension (both legs)",   factor:1.80,inc:2.5,  note:"Both legs — roughly 1.8× single"},
+    {name:"Wall Sit (timed)",            factor:1.00,inc:5,    note:"Isometric — use resistance equivalent"},
+    {name:"Spanish Squat (band)",        factor:0.80,inc:2.5,  note:"Band-assisted — quad isolation"},
+  ],
+  "Machine Standing Leg Curl":[
+    {name:"Lying Leg Curl",              factor:0.95,inc:2.5,  note:"Lying — very similar load"},
+    {name:"Seated Leg Curl",             factor:1.05,inc:2.5,  note:"Seated — slightly stronger due to hip flexion"},
+    {name:"Romanian Deadlift (DB)",      factor:0.25,inc:2.5,  note:"Each DB — lighter, hip-hinge focus"},
+  ],
+  "Smith Machine Calf Raise":[
+    {name:"Calf Raise Machine",          factor:0.90,inc:5,    note:"Machine — similar total load"},
+    {name:"Dumbbell Standing Calf Raise",factor:0.30,inc:2.5,  note:"Each DB — much lighter per hand"},
+    {name:"Leg Press Calf Raise",        factor:1.20,inc:5,    note:"On leg press — mechanically stronger"},
+  ],
+  "Machine Seated Hip Adduction":[
+    {name:"Cable Hip Adduction",         factor:0.20,inc:2.5,  note:"Cable — single leg, much lighter"},
+    {name:"Sumo Squat (DB)",             factor:0.15,inc:2.5,  note:"Single DB — compound adduction"},
+    {name:"Band Hip Adduction",          factor:0.15,inc:2.5,  note:"Band — use nearest equivalent"},
+  ],
+  "Machine Seated Hip Abduction":[
+    {name:"Cable Hip Abduction",         factor:0.20,inc:2.5,  note:"Cable — single leg, much lighter"},
+    {name:"Band Hip Abduction (standing)",factor:0.15,inc:2.5, note:"Band — bodyweight resistance"},
+    {name:"Side-Lying Hip Abduction",    factor:0.10,inc:2.5,  note:"Bodyweight — use resistance equivalent"},
+  ],
+  // ── PUSH S2 ──
+  "Incline Dumbbell Press":[
+    {name:"Incline Barbell Press",       factor:2.20,inc:2.5,  note:"Bar total — roughly 2.2× DB load"},
+    {name:"Incline Machine Press",       factor:1.90,inc:5,    note:"Machine — similar incline stimulus"},
+    {name:"Cable Incline Fly",           factor:0.70,inc:2.5,  note:"Cable fly — isolation, go lighter"},
+  ],
+  "Dumbbell Shoulder Press":[
+    {name:"Barbell Shoulder Press",      factor:2.10,inc:2.5,  note:"Bar total — roughly 2.1× DB load"},
+    {name:"Arnold Press",                factor:0.95,inc:1.25, note:"Each DB — similar load, more rotation"},
+    {name:"Seated Machine Press",        factor:1.80,inc:5,    note:"Machine — similar overhead stimulus"},
+  ],
+  "Cable Crossover (Low)":[
+    {name:"Pec Deck (low setting)",      factor:1.00,inc:5,    note:"Machine — same lower chest emphasis"},
+    {name:"Dumbbell Low Flye",           factor:0.35,inc:1.25, note:"Each DB — lighter, control the stretch"},
+    {name:"Resistance Band Crossover",   factor:0.80,inc:2.5,  note:"Band — use nearest equivalent"},
+  ],
+  "Overhead Tricep Extension (Cable)":[
+    {name:"EZ Bar Skull Crusher",        factor:0.95,inc:1.25, note:"Bar — similar overhead tricep load"},
+    {name:"Dumbbell Overhead Ext (both)",factor:0.85,inc:1.25, note:"Single DB held with both hands"},
+    {name:"Tricep Pushdown (rope)",      factor:1.10,inc:1.25, note:"Pushdown — slightly stronger position"},
+  ],
+  "Dumbbell Kickback":[
+    {name:"Cable Kickback",              factor:1.00,inc:1.25, note:"Cable — same load, constant tension"},
+    {name:"Tricep Pushdown (single arm)",factor:1.80,inc:1.25, note:"Pushdown — stronger position, go up"},
+    {name:"Band Kickback",               factor:0.90,inc:1.25, note:"Band — use nearest equivalent"},
+  ],
+  "Cable Lateral Raise":[
+    {name:"Dumbbell Lateral Raise",      factor:1.00,inc:1,    note:"DB — same load"},
+    {name:"Machine Lateral Raise",       factor:1.10,inc:2.5,  note:"Machine — slight mechanical advantage"},
+    {name:"Band Lateral Raise",          factor:0.80,inc:1,    note:"Band — use nearest equivalent"},
+  ],
+  // ── PULL S2 ──
+  "Underhand Lat Pulldown":[
+    {name:"Close Grip Pulldown",         factor:1.00,inc:2.5,  note:"Neutral grip — very similar load"},
+    {name:"Assisted Chin-Up",            factor:0.90,inc:5,    note:"Bodyweight — set counterweight"},
+    {name:"Single Arm Cable Pulldown",   factor:0.55,inc:2.5,  note:"Per arm — roughly half the total load"},
+  ],
+  "Dumbbell Single Arm Row":[
+    {name:"Cable Single Arm Row",        factor:1.00,inc:2.5,  note:"Cable — same load, constant tension"},
+    {name:"Machine Row (one arm)",       factor:1.05,inc:5,    note:"Machine — slight stability advantage"},
+    {name:"Chest-Supported Row",         factor:1.80,inc:2.5,  note:"Both arms — double the single-arm load"},
+  ],
+  "Straight Arm Pulldown":[
+    {name:"Dumbbell Pullover",           factor:1.00,inc:1.25, note:"DB — similar lat isolation"},
+    {name:"Cable Pullover (rope)",       factor:1.00,inc:2.5,  note:"Rope — same exercise, different feel"},
+    {name:"Band Straight Arm Pulldown",  factor:0.80,inc:2.5,  note:"Band — use nearest equivalent"},
+  ],
+  "Dumbbell Hammer Curl":[
+    {name:"Cable Hammer Curl (rope)",    factor:1.00,inc:1.25, note:"Cable — same load, constant tension"},
+    {name:"Barbell Curl (neutral grip)", factor:1.90,inc:1.25, note:"Bar — two arms, roughly 1.9× DB"},
+    {name:"Cross-Body Curl",             factor:1.00,inc:1.25, note:"DB — same load, different angle"},
+  ],
+  "Cable Curl (EZ-bar)":[
+    {name:"Barbell Curl",                factor:1.00,inc:1.25, note:"Straight bar — similar total load"},
+    {name:"Dumbbell Curl (both)",        factor:0.45,inc:1.25, note:"Each DB — roughly half EZ bar total"},
+    {name:"Machine Bicep Curl",          factor:1.00,inc:2.5,  note:"Machine — same stimulus"},
+  ],
+  "Face Pull (Rope)":[
+    {name:"Band Face Pull",              factor:0.80,inc:2.5,  note:"Band — use nearest equivalent"},
+    {name:"Rear Delt Machine",           factor:0.90,inc:2.5,  note:"Machine — same rear delt stimulus"},
+    {name:"Cable Rear Delt Fly",         factor:0.80,inc:2.5,  note:"Cable — slightly different angle"},
+  ],
+  "Incline Dumbbell Rear Delt Raise":[
+    {name:"Bent-Over Rear Delt Raise",   factor:1.00,inc:1.25, note:"Standing — same load, less chest support"},
+    {name:"Cable Rear Delt Fly",         factor:1.10,inc:1.25, note:"Cable — constant tension"},
+    {name:"Machine Rear Delt Fly",       factor:1.30,inc:2.5,  note:"Machine — slight mechanical advantage"},
+  ],
+  // ── LEGS S2 ──
+  "Hack Squat (Smith Machine)":[
+    {name:"Barbell Hack Squat",          factor:0.90,inc:2.5,  note:"Free weight — harder to balance"},
+    {name:"Front Squat",                 factor:0.85,inc:2.5,  note:"Barbell front — similar quad emphasis"},
+    {name:"Pendulum Squat",              factor:1.00,inc:5,    note:"Machine — same quad-dominant load"},
+  ],
+  "Bulgarian Split Squat":[
+    {name:"Reverse Lunge (DB)",          factor:1.00,inc:1.25, note:"Each DB — same load, slightly easier balance"},
+    {name:"Step-Up (DB)",                factor:0.90,inc:1.25, note:"Each DB — similar unilateral stimulus"},
+    {name:"Smith Machine Split Squat",   factor:1.80,inc:2.5,  note:"Bar total — fixed path, roughly 1.8× DB"},
+  ],
+  "Lying Leg Curl":[
+    {name:"Seated Leg Curl",             factor:1.05,inc:2.5,  note:"Seated — similar load, hip flexion engaged"},
+    {name:"Standing Leg Curl",           factor:0.95,inc:2.5,  note:"Standing — same muscle, slight difference"},
+    {name:"Nordic Curl (assisted)",      factor:1.00,inc:5,    note:"Bodyweight — set assisted load equivalent"},
+  ],
+  "Seated Calf Raise":[
+    {name:"Standing Calf Raise (machine)",factor:1.80,inc:5,   note:"Machine — standing engages more gastrocnemius"},
+    {name:"Smith Machine Calf Raise",    factor:1.80,inc:5,    note:"Smith — use bar + plates equivalent"},
+    {name:"Leg Press Calf Raise",        factor:2.20,inc:5,    note:"On leg press — mechanically stronger"},
+  ],
+  "Cable Pull-Through":[
+    {name:"Romanian Deadlift (DB)",      factor:1.10,inc:2.5,  note:"DB — hip hinge, slightly heavier"},
+    {name:"Kettlebell Swing",            factor:0.60,inc:2.5,  note:"KB — explosive hip hinge, go lighter"},
+    {name:"Hip Thrust (DB)",             factor:1.50,inc:5,    note:"DB — glute bridge focus, heavier"},
+  ],
+};
+
+// Derive substitute weight array from the source exercise's programmed weights
+function buildSubWeights(subDef,sourceWeights){
+  if(!subDef||!sourceWeights)return Array(20).fill(0);
+  return sourceWeights.map(w=>roundTo(w*subDef.factor,subDef.inc));
+}
+
+// ─── GAMIFICATION ─────────────────────────────────────────────────────────────
+function calcStats(log,week,phases){
+  let totalDone=0,allTimeDone=0,sessionsDone=0,prs=0,totalVolumeLoad=0;
+  const phKey=getPhase(week,phases).phaseKey;
+
+  // All-time sets and volume (for score)
+  Object.values(log).forEach(v=>(v.sets||[]).forEach(s=>{
+    if(!s?.done)return;
+    allTimeDone++;
+    totalVolumeLoad+=(parseFloat(s.weight)||0)*(parseFloat(s.reps)||0);
+  }));
+
+  // Sets done THIS week only — scan actual log keys to catch substituted exercises
+  ["push","pull","legs"].forEach(m=>{
+    ["1","2"].forEach(sl=>{
+      const sid=`${m}-${sl}`;
+      const exList=sl==="1"?BASE_EX[m]:S2_EX[m];
+      const total=exList.reduce((s,ex)=>s+(ex.sets[phKey]||3),0);
+      // Count done sets from log — use any key matching this sid+week (catches subs)
+      const prefix=`${sid}|w${week}|`;
+      let done=0;
+      Object.entries(log).forEach(([key,val])=>{
+        if(!key.startsWith(prefix))return;
+        const d=(val.sets||[]).filter(x=>x?.done).length;
+        done+=d;
+        totalDone+=d;
+      });
+      if(total>0&&done>=total)sessionsDone++;
+    });
+  });
+
+  // PRs: per-exercise per-sid — only compare same sid + same exercise across weeks
+  ["push","pull","legs"].forEach(m=>{
+    ["1","2"].forEach(sl=>{
+      const sid=`${m}-${sl}`;
+      const exList=sl==="1"?BASE_EX[m]:S2_EX[m];
+      exList.forEach(ex=>{
+        const thisEntry=log[`${sid}|w${week}|${ex.name}`];
+        if(!thisEntry?.sets?.length)return;
+        const thisMax=Math.max(0,...thisEntry.sets.filter(x=>x?.done&&x.weight).map(x=>parseFloat(x.weight)||0));
+        if(!thisMax)return;
+        let isPr=true;
+        for(let pw=1;pw<week;pw++){
+          const prev=log[`${sid}|w${pw}|${ex.name}`];
+          if(!prev?.sets?.length)continue;
+          const prevMax=Math.max(0,...prev.sets.filter(x=>x?.done&&x.weight).map(x=>parseFloat(x.weight)||0));
+          if(thisMax<=prevMax){isPr=false;break;}
+        }
+        if(isPr&&week>1)prs++;
+      });
+    });
+  });
+
+  const score=Math.floor(totalVolumeLoad/500)+(sessionsDone*5)+(prs*3);
+  const level=score<50?"Beginner":score<200?"Intermediate":score<500?"Advanced":"Elite";
+  const bands={Beginner:[0,50],Intermediate:[50,200],Advanced:[200,500],Elite:[500,1000]};
+  return{totalDone,allTimeDone,sessionsDone,prs,score,totalVolumeLoad,level,levelMin:bands[level][0],levelMax:bands[level][1]};
+}
+
+function weeklyVolume(log){
+  const sets={},weight={};
+  Object.entries(log).forEach(([key,val])=>{
+    const m=key.match(/\|w(\d+)\|/);if(!m)return;
+    const w=parseInt(m[1]);
+    if(!sets[w])sets[w]=0;
+    if(!weight[w])weight[w]=0;
+    (val.sets||[]).forEach(s=>{
+      if(!s?.done)return;
+      sets[w]++;
+      weight[w]+=(parseFloat(s.weight)||0)*(parseFloat(s.reps)||0);
+    });
+  });
+  return{sets,weight};
+}
+
+// ─── STORAGE ──────────────────────────────────────────────────────────────────
+const LS={
+  LOG:"ppl_log_v4",WEEK:"ppl_week_v1",MAXES:"ppl_maxes_v1",
+  SETTINGS:"ppl_settings_v1",RPE_ADJ:"ppl_rpe_adj_v1",
+  BLOCKS:"ppl_blocks_v1",
+  BLOCK_NUM:"ppl_block_num_v1",
+  SESSION_DATES:"ppl_session_dates_v1", // {"push-1|w3":"2025-06-07", ...}
+};
+const loadLog=()=>{
+  try{
+    const stored=localStorage.getItem(LS.LOG);
+    if(stored)return JSON.parse(stored);
+    // Pre-populate Week 1 Push 1 session from first real session
+    return{
+      "push-1|w1|Barbell Bench Press":              {sets:[{weight:"82.5",reps:"6",rpe:7,done:true},{weight:"82.5",reps:"6",rpe:8,done:true},{weight:"82.5",reps:"6",rpe:8,done:true}],note:""},
+      "push-1|w1|Barbell Shoulder Press":           {sets:[{weight:"45",reps:"8",rpe:8,done:true},{weight:"45",reps:"8",rpe:8,done:true},{weight:"45",reps:"8",rpe:8,done:true}],note:""},
+      "push-1|w1|Cable Standing Chest Press":       {sets:[{weight:"70",reps:"12",rpe:8,done:true},{weight:"70",reps:"12",rpe:7,done:true},{weight:"70",reps:"12",rpe:7,done:true}],note:""},
+      "push-1|w1|Cable Tricep Pushdown (Single Arm)":{sets:[{weight:"16.25",reps:"8",rpe:10,done:true},{weight:"15",reps:"9",rpe:9,done:true},{weight:"15",reps:"8",rpe:9,done:true},{weight:"15",reps:"4",rpe:10,done:true}],note:""},
+      "push-1|w1|Cable Bent-Over Tricep Extension": {sets:[{weight:"30",reps:"9",rpe:9,done:true},{weight:"30",reps:"9",rpe:9,done:true},{weight:"30",reps:"9",rpe:10,done:true}],note:""},
+      "push-1|w1|Dumbbell Lateral Raise":           {sets:[{weight:"9",reps:"10",rpe:9,done:true},{weight:"9",reps:"10",rpe:7,done:true},{weight:"9",reps:"10",rpe:8,done:true}],note:""},
+    };
+  }catch{return{};}
+};const saveLog=l=>{try{localStorage.setItem(LS.LOG,JSON.stringify(l));}catch{}};
+const loadWeek=()=>{try{return parseInt(localStorage.getItem(LS.WEEK)||"1");}catch{return 1;}};
+const saveWeek=w=>{try{localStorage.setItem(LS.WEEK,String(w));}catch{}};
+const loadMaxes=()=>{try{return JSON.parse(localStorage.getItem(LS.MAXES)||"null");}catch{return null;}};
+const saveMaxes=m=>{try{localStorage.setItem(LS.MAXES,JSON.stringify(m));}catch{}};
+const loadSettings=()=>{try{return JSON.parse(localStorage.getItem(LS.SETTINGS)||'{"mode":"light","accent":"sport"}');}catch{return{mode:"light",accent:"sport"};}};
+const saveSettings=s=>{try{localStorage.setItem(LS.SETTINGS,JSON.stringify(s));}catch{}};
+const loadRpeAdj=()=>{try{return JSON.parse(localStorage.getItem(LS.RPE_ADJ)||"{}");}catch{return{};}};
+const saveRpeAdj=a=>{try{localStorage.setItem(LS.RPE_ADJ,JSON.stringify(a));}catch{}};
+const loadBlocks=()=>{try{return JSON.parse(localStorage.getItem(LS.BLOCKS)||"[]");}catch{return[];}};
+const saveBlocks=b=>{try{localStorage.setItem(LS.BLOCKS,JSON.stringify(b));}catch{}};
+const loadBlockNum=()=>{try{return parseInt(localStorage.getItem(LS.BLOCK_NUM)||"1");}catch{return 1;}};
+const saveBlockNum=n=>{try{localStorage.setItem(LS.BLOCK_NUM,String(n));}catch{}};
+const loadSessionDates=()=>{try{return JSON.parse(localStorage.getItem(LS.SESSION_DATES)||"{}");}catch{return{};}};
+const saveSessionDates=d=>{try{localStorage.setItem(LS.SESSION_DATES,JSON.stringify(d));}catch{}};
+const mk=(sid,wk,ex)=>`${sid}|w${wk}|${ex}`;
+
+// Date helpers
+const toDateStr=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const todayStr=()=>toDateStr(new Date());
+
+// Build calendar map: {"2025-06-07": [{sid:"push-1",muscle:"push",label:"Push 1",color},...]}
+function buildCalendarMap(sessionDates,accent){
+  const map={};
+  Object.entries(sessionDates).forEach(([key,date])=>{
+    if(!date)return;
+    const m=key.match(/^([a-z]+-[12])\|w\d+$/);
+    if(!m)return;
+    const sid=m[1];
+    const muscle=sid.replace(/-[12]$/,"");
+    const slot=sid.endsWith("-2")?"2":"1";
+    const label=`${muscle.charAt(0).toUpperCase()+muscle.slice(1)} ${slot}`;
+    const color=muscle==="push"?accent.push:muscle==="pull"?accent.pull:accent.legs;
+    if(!map[date])map[date]=[];
+    // Avoid duplicates (same session same day)
+    if(!map[date].find(e=>e.sid===sid))map[date].push({sid,muscle,label,color});
+  });
+  return map;
+}
+
+// Export all data as a downloadable JSON file
+function exportData(log,maxes,rpeAdj,settings,blocks,blockNum,week,sessionDates){
+  const data={version:2,exportedAt:new Date().toISOString(),blockNum,week,log,maxes,rpeAdj,settings,blocks,sessionDates};
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;a.download=`ppl-logger-backup-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},100);
+}
+
+// Import data from a JSON backup file — returns parsed data or throws
+function parseImport(jsonStr){
+  const d=JSON.parse(jsonStr);
+  if(!d.version||!d.log||!d.maxes)throw new Error("Invalid backup file");
+  return d;
+}
+
+// Phase target RPE — the ideal average RPE for each phase
+const PHASE_TARGET_RPE={accumulation:7.5,intensification:8.5,deload:6.0,peak:9.0};
+// Display range shown as placeholder in RPE stepper (mirrors rep range style)
+const PHASE_RPE_RANGE={accumulation:"7–8",intensification:"8–9",deload:"5–6",peak:"9–10"};
+
+// Compute average RPE for a set of log entries
+function avgRpe(sets){
+  const rated=sets.filter(s=>s?.done&&s.rpe);
+  if(rated.length<1)return null;
+  return rated.reduce((s,x)=>s+parseInt(x.rpe),0)/rated.length;
+}
+
+// Compute per-exercise RPE adjustments from a completed week of log data.
+// Returns {[sid|exName]: factor} where factor nudges next week's weight up/down.
+function computeRpeAdj(log,week,phases,existingAdj){
+  const phKey=getPhase(week,phases).phaseKey;
+  const targetRpe=PHASE_TARGET_RPE[phKey]||8;
+  const newAdj={...existingAdj};
+  ["push","pull","legs"].forEach(m=>{
+    ["1","2"].forEach(sl=>{
+      const sid=`${m}-${sl}`;
+      const exList=sl==="1"?BASE_EX[m]:S2_EX[m];
+      exList.forEach(ex=>{
+        const entry=log[mk(sid,week,ex.name)];
+        if(!entry?.sets)return;
+        const avg=avgRpe(entry.sets);
+        if(avg===null)return; // not enough RPE data
+        const diff=avg-targetRpe;
+        // Each RPE point away from target = ±2.5% weight adjustment, capped at ±7.5%
+        const nudge=Math.max(-0.075,Math.min(0.075,diff*0.025));
+        const adjKey=`${sid}|${ex.name}`;
+        const current=newAdj[adjKey]||1.0;
+        // Blend: 70% existing, 30% new signal — avoids over-reacting to one session
+        newAdj[adjKey]=Math.max(0.85,Math.min(1.15,current*0.7+(1+nudge)*0.3));
+      });
+    });
+  });
+  return newAdj;
+}
+
+// Weekly average RPE per muscle group, for the RPE trend chart
+function weeklyRpeByMuscle(log){
+  const out={}; // {week: {push,pull,legs,overall}}
+  Object.entries(log).forEach(([key,val])=>{
+    const m=key.match(/^(push|pull|legs)-[12]\|w(\d+)\|/);
+    if(!m)return;
+    const muscle=m[1],w=parseInt(m[2]);
+    if(!out[w])out[w]={push:[],pull:[],legs:[]};
+    (val.sets||[]).forEach(s=>{
+      if(s?.done&&s.rpe)out[w][muscle].push(parseInt(s.rpe));
+    });
+  });
+  // Average each
+  const result={};
+  Object.entries(out).forEach(([w,d])=>{
+    const avg=arr=>arr.length?arr.reduce((a,b)=>a+b,0)/arr.length:null;
+    const all=[...d.push,...d.pull,...d.legs];
+    result[w]={push:avg(d.push),pull:avg(d.pull),legs:avg(d.legs),overall:avg(all)};
+  });
+  return result;
+}
+
+// ─── ROOT APP ─────────────────────────────────────────────────────────────────
+function App(){
+  const [settings,setSettingsState]=useState(()=>loadSettings());
+  const [tab,setTab]=useState("dashboard");
+  const [week,setWeekState]=useState(()=>loadWeek());
+  const [log,setLog]=useState(()=>loadLog());
+  const [maxes,setMaxes]=useState(()=>loadMaxes()||DEFAULT_MAXES);
+  const [rpeAdj,setRpeAdj]=useState(()=>loadRpeAdj());
+  const [blocks,setBlocks]=useState(()=>loadBlocks());
+  const [blockNum,setBlockNum]=useState(()=>loadBlockNum());
+  const [sessionDates,setSessionDates]=useState(()=>loadSessionDates());
+  const [screen,setScreen]=useState("home");
+  const [sid,setSid]=useState("push-1");
+  const [saved,setSaved]=useState(false);
+  const saveTimer=useRef(null);
+
+  const theme=useMemo(()=>buildTheme(settings.mode,settings.accent),[settings]);
+  const accent=theme.accent;
+  const phases=useMemo(()=>buildPhases(accent),[accent]);
+  const META=useMemo(()=>getMeta(accent),[accent]);
+
+  const updSettings=useCallback(s=>{const ns={...settings,...s};setSettingsState(ns);saveSettings(ns);},[settings]);
+
+  useEffect(()=>{
+    if(saveTimer.current)clearTimeout(saveTimer.current);
+    saveTimer.current=setTimeout(()=>{saveLog(log);setSaved(true);setTimeout(()=>setSaved(false),1400);},600);
+    return()=>clearTimeout(saveTimer.current);
+  },[log]);
+
+  const setWeek=useCallback(w=>{setWeekState(w);saveWeek(w);},[]);
+  const phase=useMemo(()=>getPhase(week,phases),[week,phases]);
+  const phaseKey=phase.phaseKey;
+
+  const computedW1=useMemo(()=>buildWeightsFromMaxes(maxes),[maxes]);
+  const mergedW1=useMemo(()=>({
+    push:{...W1.push,...computedW1.push},
+    pull:{...W1.pull,...computedW1.pull},
+    legs:{...W1.legs,...computedW1.legs},
+  }),[computedW1]);
+  const mergedW2=useMemo(()=>buildW2(mergedW1),[mergedW1]);
+
+  // Apply rpeAdj factors on top of base weights
+  const applyRpeAdj=useCallback((muscle,slot,weightMap)=>{
+    const out={};
+    Object.entries(weightMap).forEach(([exName,arr])=>{
+      const factor=rpeAdj[`${muscle}-${slot}|${exName}`]||1.0;
+      const inc=INC[exName]||2.5;
+      out[exName]=factor===1.0?arr:arr.map(w=>roundTo(w*factor,inc));
+    });
+    return out;
+  },[rpeAdj]);
+
+  const getW1=useCallback(muscle=>applyRpeAdj(muscle,"1",mergedW1[muscle]||{}),[mergedW1,applyRpeAdj]);
+  const getW2=useCallback(muscle=>applyRpeAdj(muscle,"2",mergedW2[muscle]||{}),[mergedW2,applyRpeAdj]);
+
+  // Called when leaving a session — recompute RPE adjustments for that week
+  const finaliseRpeAdj=useCallback((forWeek)=>{
+    const newAdj=computeRpeAdj(log,forWeek,phases,rpeAdj);
+    setRpeAdj(newAdj);
+    saveRpeAdj(newAdj);
+  },[log,phases,rpeAdj]);
+
+  const updSet=useCallback((s,wk,ex,i,f,v,fallbackW,fallbackR,fallbackRpe,spliceSets)=>{
+    if(f==="weight")v=String(v).replace(",",".");
+    const key=mk(s,wk,ex);
+    setLog(p=>{
+      const e=p[key]||{sets:[],note:""};
+      if(f==="_splice")return{...p,[key]:{...e,sets:spliceSets||[]}};
+      if(f==="_init"){const sets=[...(e.sets||[]),{weight:"",reps:"",done:false}];return{...p,[key]:{...e,sets}};}
+      if(f==="_prefill_commit"){
+        const sets=[...(e.sets||[])];
+        if(!sets[i]){
+          // Strip _prefilled marker before persisting
+          const {_prefilled,...cleanSet}={weight:String(fallbackW||""),reps:String(fallbackR||""),rpe:fallbackRpe,done:false,_prefilled:true};
+          sets[i]=cleanSet;
+        }
+        return{...p,[key]:{...e,sets}};
+      }      const sets=[...(e.sets||[])];
+      const cur=sets[i]||{};
+      const updated={...cur,[f]:v};
+      if(f!=="done"&&f!=="rpe"){
+        const w=f==="weight"?v:cur.weight,r=f==="reps"?v:cur.reps;
+        updated.done=!!(w&&String(w).trim()&&r&&String(r).trim());
+      } else if(f==="done"&&v===true){
+        if(!updated.weight||!String(updated.weight).trim())updated.weight=String(fallbackW||"");
+        if(!updated.reps||!String(updated.reps).trim())updated.reps=String(fallbackR||"");
+        if(!updated.rpe&&fallbackRpe)updated.rpe=fallbackRpe;
+      } else if(f==="done"&&v===false){
+        if(updated.rpe&&fallbackRpe&&String(updated.rpe)===String(fallbackRpe))delete updated.rpe;
+      }
+      sets[i]=updated;
+      const newLog={...p,[key]:{...e,sets}};
+      // Auto-stamp calendar date on first completed set — only if not already stamped
+      if((f==="done"&&v===true)||(f!=="done"&&f!=="rpe"&&updated.done)){
+        const dateKey=`${s}|w${wk}`;
+        setSessionDates(prev=>{
+          if(prev[dateKey])return prev;
+          const newDates={...prev,[dateKey]:todayStr()};
+          saveSessionDates(newDates);
+          return newDates;
+        });
+      }
+      return newLog;
+    });
+  },[]);
+
+  const updNote=useCallback((s,wk,ex,note)=>{
+    const key=mk(s,wk,ex);
+    setLog(p=>{const e=p[key]||{sets:[],note:""};return{...p,[key]:{...e,note}};});
+  },[]);
+
+  const getEntry=useCallback((s,wk,ex)=>log[mk(s,wk,ex)]||{sets:[],note:""},[log]);
+
+  const getStats=useCallback((sid,swapsForSid={})=>{
+    const m=META[sid];
+    const total=m.exercises.reduce((s,ex)=>s+(ex.sets[phaseKey]||3),0);
+    const done=m.exercises.reduce((s,ex)=>{
+      const activeName=swapsForSid[ex.name]||ex.name;
+      return s+(getEntry(sid,week,activeName).sets||[]).filter(x=>x?.done).length;
+    },0);
+    return{total,done,pct:total>0?done/total:0};
+  },[META,phaseKey,getEntry,week]);
+
+  const handleSaveMaxes=useCallback(nm=>{setMaxes(nm);saveMaxes(nm);},[]);
+
+  const handleReset=useCallback(()=>{
+    setLog({});setRpeAdj({});setWeekState(1);setSessionDates({});
+    saveLog({});saveRpeAdj({});saveWeek(1);saveSessionDates({});
+  },[]);
+
+  // Archive current block and start a fresh one
+  const handleStartNewBlock=useCallback(()=>{
+    const archived={blockNum,startedAt:new Date().toISOString(),log,maxes,rpeAdj,sessionDates};
+    const newBlocks=[...blocks,archived];
+    const newBlockNum=blockNum+1;
+    setBlocks(newBlocks);saveBlocks(newBlocks);
+    setBlockNum(newBlockNum);saveBlockNum(newBlockNum);
+    setLog({});saveLog({});
+    setRpeAdj({});saveRpeAdj({});
+    setSessionDates({});saveSessionDates({});
+    setWeekState(1);saveWeek(1);
+  },[blockNum,log,maxes,rpeAdj,blocks,sessionDates]);
+
+  const handleExport=useCallback(()=>{
+    exportData(log,maxes,rpeAdj,settings,blocks,blockNum,week,sessionDates);
+  },[log,maxes,rpeAdj,settings,blocks,blockNum,week,sessionDates]);
+
+  const handleImport=useCallback(jsonStr=>{
+    try{
+      const d=parseImport(jsonStr);
+      setLog(d.log);saveLog(d.log);
+      setMaxes(d.maxes);saveMaxes(d.maxes);
+      if(d.rpeAdj){setRpeAdj(d.rpeAdj);saveRpeAdj(d.rpeAdj);}
+      if(d.blocks){setBlocks(d.blocks);saveBlocks(d.blocks);}
+      if(d.blockNum){setBlockNum(d.blockNum);saveBlockNum(d.blockNum);}
+      if(d.settings){setSettingsState(d.settings);saveSettings(d.settings);}
+      if(d.sessionDates){setSessionDates(d.sessionDates);saveSessionDates(d.sessionDates);}
+      // Restore week from backup, default to 1
+      const restoredWeek=d.week&&d.week>=1&&d.week<=20?d.week:1;
+      setWeekState(restoredWeek);saveWeek(restoredWeek);
+      return true;
+    }catch(e){return false;}
+  },[]);
+
+  const handleSessionBack=useCallback(()=>{
+    finaliseRpeAdj(week);
+    // Stamp today's date only if not already stamped (prevents overwriting on re-entry)
+    const dateKey=`${sid}|w${week}`;
+    setSessionDates(prev=>{
+      if(prev[dateKey])return prev; // already stamped — don't overwrite
+      // Check log directly via setLog to avoid stale closure
+      let hasDone=false;
+      setLog(l=>{
+        hasDone=META[sid].exercises.some(ex=>(l[mk(sid,week,ex.name)]?.sets||[]).some(s=>s?.done));
+        return l; // no change
+      });
+      if(!hasDone)return prev;
+      const newDates={...prev,[dateKey]:todayStr()};
+      saveSessionDates(newDates);
+      return newDates;
+    });
+    setScreen("home");
+  },[week,sid,META,sessionDates,finaliseRpeAdj]);
+
+  // Persist swaps across Back/Forward within the same day — keyed by sid|week
+  const sessionSwapsRef=useRef({});
+
+  const showSession=screen==="session";
+  const showHistory=screen==="history";
+  const showTab=!showSession&&!showHistory;
+
+  // Navigate into a specific session from anywhere (calendar, dashboard, program)
+  const goSession=useCallback((newSid,newWeek)=>{
+    setSid(newSid);
+    if(newWeek!==undefined)setWeek(newWeek);
+    setScreen("session");
+  },[setWeek]);
+  const T=theme;
+
+  return(
+    <ThemeCtx.Provider value={T}>
+    <div style={{display:"flex",flexDirection:"column",height:"100vh",background:T.bg,maxWidth:480,margin:"0 auto",fontFamily:"-apple-system,'Helvetica Neue',sans-serif",color:T.text}}>
+      <div style={{flex:1,overflow:"hidden",display:"flex",flexDirection:"column",minHeight:0}}>
+        {showTab&&tab==="dashboard"&&<DashboardTab log={log} week={week} setWeek={setWeek} phase={phase} phases={phases} accent={accent} rpeAdj={rpeAdj} blockNum={blockNum} sessionDates={sessionDates} setSessionDates={(d)=>{setSessionDates(d);saveSessionDates(d);}} onGoProgram={()=>setTab("program")} onGoSession={goSession} onNewBlock={handleStartNewBlock}/>}
+        {showTab&&tab==="program"&&<ProgramTab week={week} setWeek={setWeek} phase={phase} phases={phases} phaseKey={phaseKey} accent={accent} getStats={getStats} META={META} setSid={s=>goSession(s)} onHistory={()=>setScreen("history")}/>}
+        {showTab&&tab==="maxes"&&<MaxesTab maxes={maxes} onSave={handleSaveMaxes}/>}
+        {showTab&&tab==="settings"&&<SettingsTab settings={settings} onUpdate={updSettings} onReset={handleReset} onExport={handleExport} onImport={handleImport}/>}
+        {showSession&&<SessionScreen sid={sid} week={week} phase={phase} phaseKey={phaseKey} META={META} getEntry={getEntry} updSet={updSet} updNote={updNote} saved={saved} getW1={getW1} getW2={getW2} rpeAdj={rpeAdj} phases={phases} sessionSwapsRef={sessionSwapsRef} onBack={handleSessionBack}/>}
+        {showHistory&&<HistoryScreen log={log} phases={phases} META={META} blocks={blocks} accent={accent} onBack={()=>setScreen("home")}/>}
+      </div>
+      <div style={{background:T.bgHeader,borderTop:`1px solid ${T.border}`,display:"flex",paddingTop:8,paddingBottom:"max(12px, env(safe-area-inset-bottom))",flexShrink:0}}>
+        {[
+          {id:"dashboard",label:"Dashboard",color:"#f97316",svg:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>},
+          {id:"program", label:"Program", color:"#3b82f6",svg:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="10" width="3" height="4" rx="1"/><rect x="19" y="10" width="3" height="4" rx="1"/><rect x="5" y="8" width="2" height="8" rx="1"/><rect x="17" y="8" width="2" height="8" rx="1"/><line x1="7" y1="12" x2="17" y2="12"/></svg>},
+          {id:"maxes",   label:"Maxes",   color:"#22c55e",svg:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>},
+          {id:"settings",label:"Settings",color:"#a855f7",svg:<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>},
+        ].map((t,idx)=>{
+          const active=tab===t.id&&showTab;
+          return <React.Fragment key={t.id}>
+            {idx>0&&<div style={{width:1,height:32,background:T.border,alignSelf:"center",flexShrink:0}}/>}
+            <button onClick={()=>{setTab(t.id);setScreen("home");}} style={{flex:1,background:"none",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,paddingBottom:4,color:t.color,opacity:active?1:0.4,transition:"opacity 0.15s"}}>
+              {t.svg}
+              <span style={{fontSize:10,fontWeight:active?700:500,color:t.color}}>{t.label}</span>
+              {active&&<div style={{width:20,height:2,borderRadius:1,background:t.color,marginTop:0}}/>}
+            </button>
+          </React.Fragment>;
+        })}
+      </div>
+    </div>
+    </ThemeCtx.Provider>
+  );
+}
+
+// ─── CALENDAR CARD ────────────────────────────────────────────────────────────
+const MONTH_NAMES=["January","February","March","April","May","June","July","August","September","October","November","December"];
+const DAY_LABELS=["M","T","W","T","F","S","S"];
+
+// Today at midnight — stable reference used by CalendarCard
+const CAL_TODAY=(()=>{const d=new Date();d.setHours(0,0,0,0);return d;})();
+
+function CalendarCard({calendarMap,accent,phases,sessionDates,setSessionDates,onGoSession}){
+  const T=useTheme();
+  const now=CAL_TODAY;
+  const [expanded,setExpanded]=useState(false);
+  const [viewYear,setViewYear]=useState(now.getFullYear());
+  const [viewMonth,setViewMonth]=useState(now.getMonth());
+  // Week view: which week offset from current (0 = this week, -1 = last week, +1 = next week)
+  const [weekOffset,setWeekOffset]=useState(0);
+  const [tipDate,setTipDate]=useState(null);
+  const [addDate,setAddDate]=useState(null);
+  const [addMuscle,setAddMuscle]=useState(null);
+  const [addSlot,setAddSlot]=useState(null);
+  const [addWeek,setAddWeek]=useState(1);
+  const [removeDate,setRemoveDate]=useState(null); // ISO date pending removal confirmation
+  const calLongPressTimer=useRef(null);
+
+  const todayIso=toDateStr(now);
+
+  // Week view: 7 days starting from Monday of the offset week
+  const weekDays=useMemo(()=>{
+    const dayOfWeek=now.getDay();
+    const mondayOffset=dayOfWeek===0?-6:1-dayOfWeek;
+    const days=[];
+    for(let d=0;d<7;d++){
+      const date=new Date(now);
+      date.setDate(now.getDate()+mondayOffset+(weekOffset*7)+d);
+      days.push(date);
+    }
+    return days;
+  },[now,weekOffset]);
+
+  const weekLabel=useMemo(()=>{
+    const first=weekDays[0],last=weekDays[6];
+    const sameMonth=first.getMonth()===last.getMonth();
+    if(sameMonth)return `${MONTH_NAMES[first.getMonth()]} ${first.getDate()}–${last.getDate()}`;
+    return `${MONTH_NAMES[first.getMonth()].slice(0,3)} ${first.getDate()} – ${MONTH_NAMES[last.getMonth()].slice(0,3)} ${last.getDate()}`;
+  },[weekDays]);
+
+  // Month view grid
+  const calDays=useMemo(()=>{
+    const firstDay=new Date(viewYear,viewMonth,1);
+    const lastDay=new Date(viewYear,viewMonth+1,0);
+    const startPad=(firstDay.getDay()+6)%7;
+    const cells=[];
+    for(let i=0;i<startPad;i++)cells.push(null);
+    for(let d=1;d<=lastDay.getDate();d++)cells.push(new Date(viewYear,viewMonth,d));
+    while(cells.length%7!==0)cells.push(null);
+    const weeks=[];
+    for(let i=0;i<cells.length;i+=7)weeks.push(cells.slice(i,i+7));
+    return weeks;
+  },[viewYear,viewMonth]);
+
+  const canGoBack=weekOffset<=-8?false:Object.keys(calendarMap).some(iso=>{
+    const d=new Date(iso+"T12:00:00");
+    return expanded
+      ?(d.getFullYear()<viewYear||(d.getFullYear()===viewYear&&d.getMonth()<viewMonth))
+      :weekOffset>-8;
+  })||weekOffset>-8;
+
+  const isCurrentPeriod=false; // always allow forward navigation for session planning
+
+  const prevPeriod=()=>{
+    setTipDate(null);setAddDate(null);
+    if(expanded){if(viewMonth===0){setViewMonth(11);setViewYear(y=>y-1);}else setViewMonth(m=>m-1);}
+    else if(weekOffset>-52)setWeekOffset(o=>o-1);
+  };
+  const nextPeriod=()=>{
+    setTipDate(null);setAddDate(null);
+    if(expanded){if(viewMonth===11){setViewMonth(0);setViewYear(y=>y+1);}else setViewMonth(m=>m+1);}
+    else setWeekOffset(o=>o+1);
+  };
+
+  const dayLongPressTimer=useRef(null);
+  const [removeDay,setRemoveDay]=useState(null); // ISO date string pending removal
+
+  const handleDayTap=(calDate)=>{
+    const iso=toDateStr(calDate);
+    const sessions=calendarMap[iso]||[];
+    if(sessions.length>0){setTipDate(prev=>prev===iso?null:iso);setAddDate(null);}
+    else{setAddDate(iso);setAddMuscle(null);setAddSlot(null);setAddWeek(1);setTipDate(null);}
+  };
+
+  const handleDayLongPress=(calDate)=>{
+    const iso=toDateStr(calDate);
+    const sessions=calendarMap[iso]||[];
+    if(sessions.length>0){setRemoveDay(iso);setTipDate(null);setAddDate(null);}
+  };
+
+  const confirmRemoveDay=()=>{
+    if(!removeDay)return;
+    // Remove all sessionDates entries pointing to this date
+    const newDates=Object.fromEntries(
+      Object.entries(sessionDates).filter(([,v])=>v!==removeDay)
+    );
+    setSessionDates(newDates);
+    setRemoveDay(null);
+    setTipDate(null);
+  };
+
+  const handleConfirmAdd=()=>{
+    if(!addMuscle||!addSlot)return;
+    const sid=`${addMuscle}-${addSlot}`;
+    const dateKey=`${sid}|w${addWeek}`;
+    setSessionDates({...sessionDates,[dateKey]:addDate});
+    onGoSession(sid,addWeek);
+    setAddDate(null);
+  };
+
+  const wkLabel=(w)=>{
+    const ph=getPhase(w,phases);
+    const pct=Math.round(WEEK_PCTS[w-1]*100);
+    return `Week ${w} · ${ph.name} · ${pct}% 1RM`;
+  };
+
+  const CMUSCLES=[{id:"push",label:"Push",color:accent.push},{id:"pull",label:"Pull",color:accent.pull},{id:"legs",label:"Legs",color:accent.legs}];
+
+  const handleRemoveDate=()=>{
+    if(!removeDate)return;
+    // Remove all sessionDates entries pointing to this date
+    const newDates=Object.fromEntries(
+      Object.entries(sessionDates||{}).filter(([,v])=>v!==removeDate)
+    );
+    setSessionDates(newDates);
+    setRemoveDate(null);
+    setTipDate(null);
+  };
+
+  const DayCell=({calDate})=>{
+    if(!calDate)return <div/>;
+    const iso=toDateStr(calDate);
+    const sessions=calendarMap[iso]||[];
+    const isToday=iso===todayIso;
+    const isFuture=calDate>now;
+    const isSelected=tipDate===iso||addDate===iso;
+    const hasSess=sessions.length>0;
+    return(
+      <div
+        onClick={()=>handleDayTap(calDate)}
+        onPointerDown={()=>{
+          if(!hasSess)return;
+          calLongPressTimer.current=setTimeout(()=>{
+            clearTimeout(calLongPressTimer.current);
+            setRemoveDate(iso);
+            setTipDate(null);
+            setAddDate(null);
+          },600);
+        }}
+        onPointerUp={()=>clearTimeout(calLongPressTimer.current)}
+        onPointerLeave={()=>clearTimeout(calLongPressTimer.current)}
+        style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2,cursor:"pointer",minHeight:44,justifyContent:"center"}}>
+        <div style={{width:30,height:30,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",
+          background:isToday?accent.acc:isSelected?accent.acc+"33":removeDate===iso?"#ef444433":"transparent",
+          border:isSelected&&!isToday?`2px solid ${accent.acc}`:removeDate===iso?`2px solid #ef4444`:`2px solid transparent`,
+          transition:"background 0.15s"}}>
+          <span style={{fontSize:13,fontWeight:isToday?800:hasSess?600:400,color:isToday?"#fff":isFuture?T.textMuted:hasSess?T.text:T.textSub}}>{calDate.getDate()}</span>
+        </div>
+        <div style={{display:"flex",gap:2,height:5,alignItems:"center"}}>
+          {sessions.slice(0,3).map((s,si)=><div key={si} style={{width:4,height:4,borderRadius:"50%",background:s.color}}/>)}
+          {!hasSess&&!isFuture&&<div style={{width:3,height:3,borderRadius:"50%",background:T.border+"80"}}/>}
+        </div>
+      </div>
+    );
+  };
+
+  return(
+    <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",boxShadow:T.shadow}}>
+      {/* Header */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.text}}>
+            {expanded?`${MONTH_NAMES[viewMonth]} ${viewYear}`:weekLabel}
+          </div>
+          {(!expanded&&weekOffset!==0)||(expanded&&!(viewYear===now.getFullYear()&&viewMonth===now.getMonth()))?(
+            <button onClick={()=>{setWeekOffset(0);setViewYear(now.getFullYear());setViewMonth(now.getMonth());}} style={{background:accent.acc+"20",border:"none",borderRadius:4,padding:"2px 6px",fontSize:9,fontWeight:700,color:accent.acc,cursor:"pointer",fontFamily:"inherit"}}>Today</button>
+          ):null}
+        </div>
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          <button onClick={prevPeriod} disabled={!expanded&&weekOffset<=-52}
+            style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,width:30,height:30,cursor:(!expanded&&weekOffset<=-52)?"default":"pointer",display:"flex",alignItems:"center",justifyContent:"center",opacity:(!expanded&&weekOffset<=-52)?0.3:1}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <button onClick={nextPeriod}
+            style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+          {/* Expand / Collapse toggle */}
+          <button onClick={()=>{setExpanded(e=>!e);setTipDate(null);setAddDate(null);}}
+            style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,width:30,height:30,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={T.text} strokeWidth="2.5" strokeLinecap="round" style={{transform:expanded?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      {/* Day headers */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+        {DAY_LABELS.map((d,i)=><div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:T.textMuted,letterSpacing:0.5,paddingBottom:4}}>{d}</div>)}
+      </div>
+
+      {/* Week view — single row of 7 days */}
+      {!expanded&&(
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          {weekDays.map((d,i)=><DayCell key={i} calDate={d}/>)}
+        </div>
+      )}
+
+      {/* Month view — all weeks */}
+      {expanded&&calDays.map((calWeek,wi)=>(
+        <div key={wi} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+          {calWeek.map((d,i)=><DayCell key={i} calDate={d}/>)}
+        </div>
+      ))}
+
+      {/* Day detail panel */}
+      {tipDate&&calendarMap[tipDate]&&(
+        <div style={{marginTop:10,padding:"10px 12px",background:T.bgInset,borderRadius:T.r10,border:`1px solid ${T.border}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+            <div style={{fontSize:10,color:T.textSub,fontWeight:600}}>{new Date(tipDate+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}</div>
+            <button onClick={()=>setTipDate(null)} style={{background:"none",border:"none",cursor:"pointer",color:T.textMuted,fontSize:16,padding:"0 0 0 8px"}}>✕</button>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {calendarMap[tipDate].map((s,i)=>{
+              const matchKey=Object.entries(sessionDates||{}).find(([k,v])=>v===tipDate&&k.startsWith(s.sid));
+              const sessWeek=matchKey?parseInt(matchKey[0].match(/w(\d+)/)?.[1]||1):1;
+              return(
+                <button key={i} onClick={()=>onGoSession(s.sid,sessWeek)}
+                  style={{display:"flex",alignItems:"center",gap:8,background:s.color+"15",border:`1px solid ${s.color}40`,borderRadius:8,padding:"8px 10px",cursor:"pointer",fontFamily:"inherit",textAlign:"left",width:"100%"}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:s.color,flexShrink:0}}/>
+                  <span style={{fontSize:13,fontWeight:600,color:T.text,flex:1}}>{s.label}</span>
+                  <span style={{fontSize:10,color:T.textSub}}>Week {sessWeek}</span>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={s.color} strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Add session sheet */}
+      {addDate&&(
+        <div style={{marginTop:10,padding:"14px",background:T.bgInset,borderRadius:T.r10,border:`1px solid ${T.border}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:T.text}}>Add session — {new Date(addDate+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"})}</div>
+            <button onClick={()=>setAddDate(null)} style={{background:"none",border:"none",cursor:"pointer",color:T.textMuted,fontSize:16,padding:0}}>✕</button>
+          </div>
+          <div style={{fontSize:10,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Muscle Group</div>
+          <div style={{display:"flex",gap:6,marginBottom:14}}>
+            {CMUSCLES.map(m=>(
+              <button key={m.id} onClick={()=>{setAddMuscle(m.id);setAddSlot(null);}}
+                style={{flex:1,padding:"10px 4px",borderRadius:T.r10,border:`2px solid ${addMuscle===m.id?m.color:T.border}`,background:addMuscle===m.id?m.color+"20":T.bgInput,color:addMuscle===m.id?m.color:T.textSub,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {addMuscle&&<>
+            <div style={{fontSize:10,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Session</div>
+            <div style={{display:"flex",gap:6,marginBottom:14}}>
+              {[{slot:"1",label:"Session 1",sub:"Primary"},{slot:"2",label:"Session 2",sub:"Variations"}].map(s=>{
+                const col=CMUSCLES.find(m=>m.id===addMuscle)?.color||accent.acc;
+                return <button key={s.slot} onClick={()=>setAddSlot(s.slot)}
+                  style={{flex:1,padding:"10px 4px",borderRadius:T.r10,border:`2px solid ${addSlot===s.slot?col:T.border}`,background:addSlot===s.slot?col+"20":T.bgInput,cursor:"pointer",fontFamily:"inherit",textAlign:"center"}}>
+                  <div style={{fontSize:12,fontWeight:700,color:addSlot===s.slot?col:T.text}}>{s.label}</div>
+                  <div style={{fontSize:10,color:T.textSub,marginTop:2}}>{s.sub}</div>
+                </button>;
+              })}
+            </div>
+          </>}
+          {addMuscle&&addSlot&&<>
+            <div style={{fontSize:10,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Week</div>
+            <select value={addWeek} onChange={e=>setAddWeek(parseInt(e.target.value))}
+              style={{width:"100%",background:T.bgInput,border:`1.5px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:"inherit",padding:"10px 12px",marginBottom:14,outline:"none"}}>
+              {Array.from({length:20},(_,i)=>i+1).map(w=><option key={w} value={w}>{wkLabel(w)}</option>)}
+            </select>
+            <button onClick={handleConfirmAdd}
+              style={{width:"100%",background:CMUSCLES.find(m=>m.id===addMuscle)?.color||accent.acc,border:"none",borderRadius:T.r10,padding:"12px",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+              Open Session →
+            </button>
+          </>}
+        </div>
+      )}
+
+      {/* Remove session confirmation */}
+      {removeDate&&(
+        <div style={{marginTop:10,padding:"14px",background:"#ef444412",borderRadius:T.r10,border:"1px solid #ef444440"}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:4}}>Remove session?</div>
+          <div style={{fontSize:11,color:T.textSub,marginBottom:12,lineHeight:1.5}}>
+            {new Date(removeDate+"T12:00:00").toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"})}
+            {" — "}
+            {(calendarMap[removeDate]||[]).map(s=>s.label).join(", ")}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setRemoveDate(null)}
+              style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"10px",fontSize:13,fontWeight:600,cursor:"pointer",color:T.text,fontFamily:"inherit"}}>
+              No
+            </button>
+            <button onClick={handleRemoveDate}
+              style={{flex:1,background:"#ef4444",border:"none",borderRadius:T.r10,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>
+              Yes, Remove
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Legend + expand hint */}
+      <div style={{display:"flex",gap:10,marginTop:12,paddingTop:10,borderTop:`1px solid ${T.borderMid}`,alignItems:"center"}}>
+        {[{c:accent.push,l:"Push"},{c:accent.pull,l:"Pull"},{c:accent.legs,l:"Legs"}].map(x=>(
+          <div key={x.l} style={{display:"flex",alignItems:"center",gap:4}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:x.c}}/>
+            <span style={{fontSize:10,color:T.textSub}}>{x.l}</span>
+          </div>
+        ))}
+        <div style={{marginLeft:"auto",fontSize:10,color:T.textMuted}}>{expanded?"Tap day to add · ↑ Collapse":"Tap day to add · ↓ Expand"}</div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DASHBOARD ────────────────────────────────────────────────────────────────
+function DashboardTab({log,week,setWeek,phase,phases,accent,rpeAdj,blockNum,sessionDates,setSessionDates,onGoProgram,onGoSession,onNewBlock}){
+  const T=useTheme();
+  const [showAchievements,setShowAchievements]=useState(false);
+  const [showAdjPanel,setShowAdjPanel]=useState(false);
+  const [showNewBlock,setShowNewBlock]=useState(false);
+  const calendarMap=useMemo(()=>buildCalendarMap(sessionDates,accent),[sessionDates,accent]);
+  const stats=useMemo(()=>calcStats(log,week,phases),[log,week,phases]);
+  const volData=useMemo(()=>weeklyVolume(log),[log]);
+  const [chartMetric,setChartMetric]=useState("sets");
+
+  const pct=Math.min(1,(stats.score-stats.levelMin)/Math.max(1,stats.levelMax-stats.levelMin));
+  const lvlColor={Beginner:accent.dld,Intermediate:accent.pull,Advanced:accent.push,Elite:accent.peak}[stats.level];
+
+  // Session completion dots for this week
+  const sessionDots=useMemo(()=>["push","pull","legs"].flatMap(m=>["1","2"].map(sl=>{
+    const sid=`${m}-${sl}`;
+    const exList=sl==="1"?BASE_EX[m]:S2_EX[m];
+    const phKey=phase.phaseKey;
+    const total=exList.reduce((s,ex)=>s+(ex.sets[phKey]||3),0);
+    const done=exList.reduce((s,ex)=>{const e=log[`${sid}|w${week}|${ex.name}`]||{sets:[]};return s+(e.sets||[]).filter(x=>x?.done).length;},0);
+    const color=m==="push"?accent.push:m==="pull"?accent.pull:accent.legs;
+    const label=`${m.charAt(0).toUpperCase()+m.slice(1)} ${sl}`;
+    return{sid,label,color,done,total,pct:total>0?done/total:0};
+  })),[log,week,phase,accent]);
+
+  // Weeks where all 3 primary sessions are complete
+  const weeksDone=useMemo(()=>Array.from({length:20},(_,i)=>i+1).filter(w=>{
+    return["push","pull","legs"].every(m=>{
+      const exList=BASE_EX[m];
+      const phKey=getPhase(w,phases).phaseKey;
+      const total=exList.reduce((s,ex)=>s+(ex.sets[phKey]||3),0);
+      const done=exList.reduce((s,ex)=>{const e=log[`${m}-1|w${w}|${ex.name}`]||{sets:[]};return s+(e.sets||[]).filter(x=>x?.done).length;},0);
+      return total>0&&done>=total;
+    });
+  }),[log,phases]);
+
+  const chartWeeks=useMemo(()=>Array.from({length:Math.min(8,week)},(_,i)=>Math.max(1,week-Math.min(7,week-1)+i)),[week]);
+  const vol=chartMetric==="sets"?volData.sets:volData.weight;
+  const maxVol=useMemo(()=>Math.max(1,...chartWeeks.map(w=>vol[w]||0)),[chartWeeks,vol]);
+
+  const fmtVol=v=>v>=1000?`${(v/1000).toFixed(1)}t`:`${Math.round(v)}kg`;
+
+  const CYCLE_ORDER=["push-1","pull-1","legs-1","push-2","pull-2","legs-2"];
+  const todaySid=useMemo(()=>{
+    const inc=CYCLE_ORDER.find(sid=>{
+      const exList=sid.endsWith("-1")?BASE_EX[sid.replace("-1","")]:S2_EX[sid.replace("-2","")];
+      const phKey=phase.phaseKey;
+      const total=exList.reduce((s,ex)=>s+(ex.sets[phKey]||3),0);
+      const done=exList.reduce((s,ex)=>{const e=log[`${sid}|w${week}|${ex.name}`]||{sets:[]};return s+(e.sets||[]).filter(x=>x?.done).length;},0);
+      return done<total;
+    });
+    return inc||CYCLE_ORDER[0];
+  },[log,week,phase]);
+
+  const rpeByWeek=useMemo(()=>weeklyRpeByMuscle(log),[log]);
+  const activeAdjs=useMemo(()=>{
+    const adjs=[];
+    ["push","pull","legs"].forEach(m=>{["1","2"].forEach(sl=>{
+      const sid=`${m}-${sl}`;
+      const exList=sl==="1"?BASE_EX[m]:S2_EX[m];
+      exList.forEach(ex=>{
+        const factor=rpeAdj[`${sid}|${ex.name}`];
+        if(factor&&Math.abs(factor-1)>0.01)adjs.push({name:ex.name,factor,pct:Math.round((factor-1)*100)});
+      });
+    });});
+    return adjs.sort((a,b)=>Math.abs(b.pct)-Math.abs(a.pct)).slice(0,4);
+  },[rpeAdj]);
+
+  return(
+    <div className="scroll tab-enter" style={{flex:1,background:T.bg}}>
+      <div className="safe-top" style={{background:T.bgHeader,padding:"0 20px 16px",borderBottom:`1px solid ${T.border}`}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:14}}>
+          <div style={{fontSize:22,fontWeight:800,color:T.text}}>Dashboard</div>
+          <div style={{fontSize:12,color:T.textSub,paddingBottom:2}}>Week {week} · {phase.name}</div>
+        </div>
+      </div>
+      <div style={{padding:"16px 14px 32px",display:"flex",flexDirection:"column",gap:14}}>
+
+        {/* Today's session shortcut — taps DIRECTLY into session screen */}
+        {(()=>{
+          const muscle=todaySid.replace(/-[12]$/,"");
+          const slot=todaySid.endsWith("-2")?"2":"1";
+          const color=muscle==="push"?accent.push:muscle==="pull"?accent.pull:accent.legs;
+          const label=`${muscle.charAt(0).toUpperCase()+muscle.slice(1)} ${slot}`;
+          const isVar=slot==="2";
+          const exList=isVar?S2_EX[muscle]:BASE_EX[muscle];
+          const total=exList.reduce((s,ex)=>s+(ex.sets[phase.phaseKey]||3),0);
+          const done=exList.reduce((s,ex)=>{const e=log[`${todaySid}|w${week}|${ex.name}`]||{sets:[]};return s+(e.sets||[]).filter(x=>x?.done).length;},0);
+          const pct=total>0?done/total:0;
+          const allDone=pct>=1;
+          return(
+            <button onClick={()=>allDone?onGoProgram():onGoSession(todaySid)} style={{background:allDone?T.bgCard:`${color}18`,borderRadius:T.r16,padding:"14px 16px",boxShadow:T.shadow,border:`2px solid ${allDone?T.border:color}`,cursor:"pointer",textAlign:"left",width:"100%",fontFamily:"inherit",display:"flex",alignItems:"center",gap:14}}>
+              <div style={{width:48,height:48,borderRadius:T.r16,background:allDone?T.bgInput:color,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke={allDone?"#8e8e93":"#fff"} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  {allDone
+                    ?<polyline points="20 6 9 17 4 12"/>
+                    :<><path d="M6 4v16M18 4v16M6 12h12M3 4h4M17 4h4M3 20h4M17 20h4"/></>}
+                </svg>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:10,fontWeight:700,color:allDone?T.textSub:color,letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>{allDone?"All done today":"Start next session"}</div>
+                <div style={{fontSize:17,fontWeight:800,color:allDone?T.textSub:T.text,marginBottom:6}}>{label}{isVar&&<span style={{fontSize:11,fontWeight:500,color:color,marginLeft:6}}>Variations</span>}</div>
+                <div style={{height:4,background:T.bgInput,borderRadius:2,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${pct*100}%`,background:color,borderRadius:2,transition:"width 0.4s"}}/>
+                </div>
+                <div style={{fontSize:10,color:allDone?T.textSub:color,marginTop:4,fontWeight:600}}>{done}/{total} sets · Week {week}</div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={allDone?T.textMuted:color} strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
+          );
+        })()}
+
+        {/* Week 20 completion banner */}
+        {week===20&&weeksDone.length>=3&&(
+          <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",border:`1.5px solid #a855f755`,boxShadow:T.shadow}}>
+            <div style={{fontSize:18,marginBottom:6}}>🏆</div>
+            <div style={{fontSize:15,fontWeight:800,color:T.text,marginBottom:4}}>Block {blockNum} Complete!</div>
+            <div style={{fontSize:12,color:T.textSub,lineHeight:1.5,marginBottom:14}}>You've finished all 20 weeks. Re-test your maxes, then start a new block — your history is preserved.</div>
+            {!showNewBlock?(
+              <button onClick={()=>setShowNewBlock(true)}
+                style={{background:"#a855f7",border:"none",borderRadius:T.r10,padding:"11px 20px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>
+                Start Block {blockNum+1} →
+              </button>
+            ):(
+              <div style={{background:T.bgInset,borderRadius:T.r10,padding:"14px",border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:4}}>Archive Block {blockNum} and reset to Week 1?</div>
+                <div style={{fontSize:11,color:T.textSub,marginBottom:12,lineHeight:1.5}}>Your log, RPE data and history are saved. Update your maxes first if you haven't already.</div>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>setShowNewBlock(false)}
+                    style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px",fontSize:13,fontWeight:600,cursor:"pointer",fontFamily:"inherit",color:T.text}}>Cancel</button>
+                  <button onClick={()=>{onNewBlock();setShowNewBlock(false);}}
+                    style={{flex:2,background:"#a855f7",border:"none",borderRadius:8,padding:"10px",fontSize:13,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>Yes, Start Block {blockNum+1}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Training overview — sessions hero + supporting stats */}
+        <div style={{background:T.bgCard,borderRadius:T.r16,padding:"18px",boxShadow:T.shadow}}>
+          {/* Sessions this week — hero number */}
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:16}}>
+            <div>
+              <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>This Week</div>
+              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                <span style={{fontSize:42,fontWeight:900,color:T.text,lineHeight:1}}>{stats.sessionsDone}</span>
+                <span style={{fontSize:16,color:T.textSub,fontWeight:500}}>/ 6 sessions</span>
+              </div>
+              <div style={{fontSize:12,color:T.textSub,marginTop:4}}>
+                {stats.sessionsDone===0?"No sessions logged yet"
+                  :stats.sessionsDone===6?"Full week complete 🎉"
+                  :`${6-stats.sessionsDone} session${6-stats.sessionsDone!==1?"s":""} remaining`}
+              </div>
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={()=>setWeek(Math.max(1,week-1))} style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,width:38,height:38,cursor:"pointer",color:T.text,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+              </button>
+              <button onClick={()=>setWeek(Math.min(20,week+1))} style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,width:38,height:38,cursor:"pointer",color:T.text,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="9 18 15 12 9 6"/></svg>
+              </button>
+            </div>
+          </div>
+          {/* Session progress bar */}
+          <div style={{height:6,background:T.bgInput,borderRadius:3,overflow:"hidden",marginBottom:16}}>
+            <div style={{height:"100%",width:`${(stats.sessionsDone/6)*100}%`,background:phase.color,borderRadius:3,transition:"width 0.6s ease"}}/>
+          </div>
+          {/* Session dots — tappable, go directly into session */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6,marginBottom:16}}>
+            {sessionDots.map(s=>(
+              <button key={s.sid} onClick={()=>s.pct>=1?null:onGoSession(s.sid)}
+                style={{cursor:s.pct>=1?"default":"pointer",textAlign:"center",padding:"8px 4px",background:s.pct>=1?s.color+"20":T.bgInset,borderRadius:T.r10,border:`1.5px solid ${s.pct>=1?s.color+"60":T.border}`,fontFamily:"inherit",display:"flex",flexDirection:"column",alignItems:"center",gap:3}}>
+                <div style={{width:20,height:20,borderRadius:"50%",background:s.pct>=1?s.color:T.border,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                  {s.pct>=1
+                    ?<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    :<div style={{width:6,height:6,borderRadius:"50%",background:T.bgInput}}/>}
+                </div>
+                <div style={{fontSize:9,fontWeight:700,color:s.pct>=1?s.color:T.textSub}}>{s.label}</div>
+                {s.done>0&&s.pct<1&&<div style={{fontSize:8,color:T.textMuted}}>{s.done}/{s.total}</div>}
+              </button>
+            ))}
+          </div>
+          {/* Supporting stats */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:0,paddingTop:14,borderTop:`1px solid ${T.borderMid}`}}>
+            {[
+              {val:stats.totalDone,label:"Sets This Week",color:accent.pull},
+              {val:stats.prs,label:"PRs Set",color:accent.peak},
+              {val:weeksDone.length,label:"Weeks Done",color:accent.push},
+            ].map((s,i)=>(
+              <div key={s.label} style={{textAlign:"center",borderRight:i<2?`1px solid ${T.borderMid}`:"none",padding:"0 4px"}}>
+                <div style={{fontSize:20,fontWeight:900,color:s.color}}>{s.val}</div>
+                <div style={{fontSize:9,color:T.textSub,marginTop:2,letterSpacing:0.3}}>{s.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Training calendar */}
+        <CalendarCard calendarMap={calendarMap} accent={accent} phases={phases} sessionDates={sessionDates} setSessionDates={setSessionDates} onGoSession={onGoSession}/>
+
+        {/* 20-week block */}
+        <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",boxShadow:T.shadow}}>
+          <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:14}}>20-Week Block</div>
+          <div style={{display:"flex",gap:3,flexWrap:"wrap"}}>
+            {Array.from({length:20},(_,i)=>i+1).map(w=>{
+              const ph=getPhase(w,phases),isNow=w===week,isDone=weeksDone.includes(w);
+              return <button key={w} onClick={()=>setWeek(w)} style={{flex:"1 0 0",minWidth:0,height:36,borderRadius:6,border:`2px solid ${isNow?ph.color:isDone?ph.color+"60":T.border}`,background:isNow?ph.color:isDone?ph.color+"22":T.bgInset,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:1}}>
+                <span style={{fontSize:7,fontWeight:800,color:isNow?"#fff":isDone?ph.color:T.textSub}}>{w}</span>
+                {isDone&&<span style={{fontSize:6,color:isNow?"#fff":ph.color}}>✓</span>}
+              </button>;
+            })}
+          </div>
+          <div style={{display:"flex",gap:12,marginTop:10,flexWrap:"wrap"}}>
+            {[{c:accent.vol,l:"Volume"},{c:accent.str,l:"Intensity"},{c:accent.dld,l:"Deload"},{c:accent.peak,l:"Peak"}].map(x=>(
+              <div key={x.l} style={{display:"flex",alignItems:"center",gap:4}}>
+                <div style={{width:8,height:8,borderRadius:2,background:x.c}}/>
+                <span style={{fontSize:10,color:T.textSub}}>{x.l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Volume chart */}
+        <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",boxShadow:T.shadow}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase"}}>Weekly Volume</div>
+            <div style={{display:"flex",background:T.bgInput,borderRadius:8,padding:2,gap:2}}>
+              {[{id:"sets",label:"Sets"},{id:"weight",label:"kg"}].map(opt=>{
+                const active=chartMetric===opt.id;
+                return <button key={opt.id} onClick={()=>setChartMetric(opt.id)}
+                  style={{padding:"4px 10px",borderRadius:6,border:"none",cursor:"pointer",fontSize:11,fontWeight:active?700:500,background:active?accent.acc:"transparent",color:active?"#fff":T.textSub,fontFamily:"inherit",transition:"all 0.15s"}}>
+                  {opt.label}
+                </button>;
+              })}
+            </div>
+          </div>
+          {(()=>{const sv=volData.sets[week]||0,wv=volData.weight[week]||0;return sv>0?(
+            <div style={{display:"flex",gap:12,marginBottom:12,padding:"10px 12px",background:T.bgInset,borderRadius:T.r10,border:`1px solid ${T.border}`}}>
+              <div style={{textAlign:"center",flex:1}}>
+                <div style={{fontSize:20,fontWeight:900,color:phase.color}}>{sv}</div>
+                <div style={{fontSize:9,color:T.textSub,marginTop:1,textTransform:"uppercase",letterSpacing:0.5}}>Sets this week</div>
+              </div>
+              <div style={{width:1,background:T.border}}/>
+              <div style={{textAlign:"center",flex:1}}>
+                <div style={{fontSize:20,fontWeight:900,color:phase.color}}>{fmtVol(wv)}</div>
+                <div style={{fontSize:9,color:T.textSub,marginTop:1,textTransform:"uppercase",letterSpacing:0.5}}>Volume this week</div>
+              </div>
+            </div>
+          ):null;})()}
+          <div style={{display:"flex",alignItems:"flex-end",gap:6,height:80}}>
+            {chartWeeks.map(w=>{
+              const v=vol[w]||0,h=maxVol>0?Math.max(4,(v/maxVol)*72):4;
+              const ph=getPhase(w,phases),isNow=w===week;
+              return <div key={w} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:3,cursor:"pointer"}} onClick={()=>setWeek(w)}>
+                {isNow&&<div style={{fontSize:7,fontWeight:800,color:ph.color,whiteSpace:"nowrap"}}>{chartMetric==="weight"?fmtVol(v):v}</div>}
+                <div style={{width:"100%",height:h,background:isNow?ph.color:ph.color+"44",borderRadius:"4px 4px 0 0",transition:"height 0.4s ease",minHeight:4}}/>
+                <div style={{fontSize:8,color:isNow?T.text:T.textMuted,fontWeight:isNow?800:400}}>W{w}</div>
+              </div>;
+            })}
+          </div>
+        </div>
+
+        {/* RPE Trend chart */}
+        {(()=>{
+          const rpeWeeks=chartWeeks.filter(w=>rpeByWeek[w]?.overall!=null);
+          if(rpeWeeks.length===0)return null;
+          const targetRpe=PHASE_TARGET_RPE[phase.phaseKey]||8;
+          const allVals=rpeWeeks.flatMap(w=>[rpeByWeek[w].push,rpeByWeek[w].pull,rpeByWeek[w].legs].filter(v=>v!=null));
+          const minV=Math.max(4,Math.min(...allVals)-1),maxV=Math.min(10,Math.max(...allVals)+0.5);
+          const scaleY=v=>v==null?null:Math.round(((v-minV)/(maxV-minV))*60);
+          const targetY=scaleY(Math.min(maxV,Math.max(minV,targetRpe)));
+
+          // Sparse view: fewer than 3 weeks → show summary tiles instead of a chart
+          const sparse=rpeWeeks.length<3;
+
+          return(
+            <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",boxShadow:T.shadow}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase"}}>RPE Trend</div>
+                <div style={{fontSize:10,color:T.textSub}}>Target: <span style={{fontWeight:700,color:accent.acc}}>{targetRpe}</span></div>
+              </div>
+              <div style={{fontSize:10,color:T.textSub,marginBottom:12}}>
+                {sparse?`${rpeWeeks.length} week${rpeWeeks.length>1?"s":""} of data — chart appears from 3 weeks`:"Average RPE per muscle group vs phase target"}
+              </div>
+
+              {sparse?(
+                // ── SPARSE: summary tiles per week ──
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {rpeWeeks.map(w=>{
+                    const d=rpeByWeek[w];
+                    const muscles=[{k:"push",c:accent.push,l:"Push"},{k:"pull",c:accent.pull,l:"Pull"},{k:"legs",c:accent.legs,l:"Legs"}];
+                    return(
+                      <div key={w} style={{background:T.bgInset,borderRadius:T.r10,padding:"12px 14px",border:`1px solid ${T.border}`}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.text,marginBottom:10}}>Week {w}</div>
+                        <div style={{display:"flex",gap:8}}>
+                          {muscles.map(({k,c,l})=>{
+                            const v=d[k];
+                            if(v==null)return null;
+                            const diff=v-targetRpe;
+                            const status=Math.abs(diff)<1?"on target":diff>0?"above":"below";
+                            const statusCol=Math.abs(diff)<1?c:diff>0?"#ef4444":"#34c759";
+                            // Bar fill proportional to RPE value (4–10 range)
+                            const barPct=Math.round(((v-4)/6)*100);
+                            return(
+                              <div key={k} style={{flex:1,display:"flex",flexDirection:"column",gap:4}}>
+                                <div style={{display:"flex",justifyContent:"space-between",alignItems:"baseline"}}>
+                                  <span style={{fontSize:9,fontWeight:700,color:c,textTransform:"uppercase",letterSpacing:0.5}}>{l}</span>
+                                  <span style={{fontSize:14,fontWeight:900,color:statusCol}}>{v.toFixed(1)}</span>
+                                </div>
+                                {/* Mini bar */}
+                                <div style={{height:4,background:T.border,borderRadius:2,overflow:"hidden"}}>
+                                  <div style={{height:"100%",width:`${barPct}%`,background:c,borderRadius:2}}/>
+                                </div>
+                                {/* Target reference tick */}
+                                <div style={{fontSize:8,color:statusCol,fontWeight:600,textAlign:"right"}}>{status}</div>
+                              </div>
+                            );
+                          }).filter(Boolean)}
+                        </div>
+                        {/* Overall */}
+                        {d.overall!=null&&(()=>{
+                          const diff=d.overall-targetRpe;
+                          const col=Math.abs(diff)<1?accent.acc:diff>0?"#ef4444":"#34c759";
+                          const msg=Math.abs(diff)<1?"On target":diff>1?"Above target — weights may be heavy":diff<-1?"Below target — you could go heavier":"Close to target";
+                          return <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderMid}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                            <span style={{fontSize:10,color:T.textSub}}>Overall avg RPE</span>
+                            <div style={{display:"flex",alignItems:"center",gap:6}}>
+                              <span style={{fontSize:13,fontWeight:900,color:col}}>{d.overall.toFixed(1)}</span>
+                              <span style={{fontSize:9,color:col,fontWeight:600}}>{msg}</span>
+                            </div>
+                          </div>;
+                        })()}
+                      </div>
+                    );
+                  })}
+                  <div style={{fontSize:10,color:T.textMuted,fontStyle:"italic",textAlign:"center",paddingTop:2}}>
+                    Log RPE in {3-rpeWeeks.length} more week{3-rpeWeeks.length!==1?"s":""} to unlock the trend chart
+                  </div>
+                </div>
+              ):(
+                // ── FULL CHART: 3+ weeks ──
+                <>
+                  <div style={{position:"relative",height:80,marginBottom:8}}>
+                    <svg width="100%" height="80" style={{overflow:"visible"}}>
+                      {targetY!=null&&<>
+                        <line x1="0" y1={80-targetY} x2="100%" y2={80-targetY} stroke={accent.acc} strokeWidth="1" strokeDasharray="4 3" opacity="0.5"/>
+                        <text x="4" y={80-targetY-3} fontSize="8" fill={accent.acc} opacity="0.8">Target {targetRpe}</text>
+                      </>}
+                      {[{key:"push",color:accent.push},{key:"pull",color:accent.pull},{key:"legs",color:accent.legs}].map(({key,color})=>{
+                        const pts=rpeWeeks.map((w,xi)=>{
+                          const v=rpeByWeek[w]?.[key];
+                          if(v==null)return null;
+                          const x=(xi/(rpeWeeks.length-1))*100;
+                          const y=80-(scaleY(v)||0);
+                          return{x,y,v,w};
+                        }).filter(Boolean);
+                        if(pts.length<1)return null;
+                        const d=pts.map((p,i)=>`${i===0?"M":"L"}${p.x}% ${p.y}`).join(" ");
+                        return <g key={key}>
+                          {pts.length>1&&<path d={d} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" opacity="0.9"/>}
+                          {pts.map((p,i)=><circle key={i} cx={`${p.x}%`} cy={p.y} r="3" fill={color}/>)}
+                        </g>;
+                      })}
+                    </svg>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",paddingLeft:2,paddingRight:2}}>
+                    {rpeWeeks.map(w=>(
+                      <div key={w} style={{fontSize:8,color:w===week?T.text:T.textMuted,fontWeight:w===week?800:400}}>W{w}</div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:12,marginTop:10,paddingTop:10,borderTop:`1px solid ${T.borderMid}`}}>
+                    {[{c:accent.push,l:"Push"},{c:accent.pull,l:"Pull"},{c:accent.legs,l:"Legs"}].map(x=>(
+                      <div key={x.l} style={{display:"flex",alignItems:"center",gap:4}}>
+                        <div style={{width:16,height:2,borderRadius:1,background:x.c}}/>
+                        <span style={{fontSize:10,color:T.textSub}}>{x.l}</span>
+                      </div>
+                    ))}
+                    <div style={{display:"flex",alignItems:"center",gap:4,marginLeft:"auto"}}>
+                      <svg width="16" height="8"><line x1="0" y1="4" x2="16" y2="4" stroke={accent.acc} strokeWidth="1.5" strokeDasharray="4 2"/></svg>
+                      <span style={{fontSize:10,color:T.textSub}}>Target</span>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Active weight adjustments from RPE */}
+        {activeAdjs.length>0&&(
+          <div style={{background:T.bgCard,borderRadius:T.r16,boxShadow:T.shadow,overflow:"hidden"}}>
+            <button onClick={()=>setShowAdjPanel(v=>!v)}
+              style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+              <div>
+                <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",textAlign:"left"}}>Auto-Regulated Weights</div>
+                <div style={{fontSize:10,color:T.textSub,marginTop:2,textAlign:"left"}}>{activeAdjs.length} exercise{activeAdjs.length!==1?"s":""} adjusted</div>
+              </div>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth="2" strokeLinecap="round" style={{transform:showAdjPanel?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s",flexShrink:0}}>
+                <polyline points="6 9 12 15 18 9"/>
+              </svg>
+            </button>
+            {showAdjPanel&&(
+              <div style={{padding:"0 16px 14px"}}>
+                <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                  {activeAdjs.map(a=>{
+                    const up=a.pct>0,col=up?"#34c759":"#ef4444";
+                    return(
+                      <div key={a.name} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 10px",background:T.bgInset,borderRadius:8,border:`1px solid ${T.border}`}}>
+                        <div style={{fontSize:12,color:T.text,fontWeight:500,flex:1,paddingRight:8}}>{a.name}</div>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <div style={{fontSize:13,fontWeight:800,color:col}}>{up?"+":""}{a.pct}%</div>
+                          <div style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:col+"20",color:col,fontWeight:700}}>{up?"↑ Heavier":"↓ Lighter"}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{fontSize:10,color:T.textMuted,marginTop:10,fontStyle:"italic"}}>Adjustments blend over multiple sessions. Max ±15% from base.</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Achievements */}
+        <div style={{background:T.bgCard,borderRadius:T.r16,boxShadow:T.shadow,overflow:"hidden"}}>
+          <button onClick={()=>setShowAchievements(v=>!v)}
+            style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"14px 16px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+            <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase"}}>Achievements</div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={T.textMuted} strokeWidth="2" strokeLinecap="round" style={{transform:showAchievements?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s",flexShrink:0}}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          {showAchievements&&(
+            <div style={{padding:"0 16px 16px"}}>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+                {[
+                  {emoji:"🏋️",label:"First Set",   earned:stats.allTimeDone>=1},
+                  {emoji:"💪",label:"10 Sets",     earned:stats.allTimeDone>=10},
+                  {emoji:"🔥",label:"50 Sets",     earned:stats.allTimeDone>=50},
+                  {emoji:"💯",label:"100 Sets",    earned:stats.allTimeDone>=100},
+                  {emoji:"⚡",label:"1st Session", earned:stats.sessionsDone>=1},
+                  {emoji:"🎯",label:"5 Sessions",  earned:stats.sessionsDone>=5},
+                  {emoji:"🏆",label:"First PR",    earned:stats.prs>=1},
+                  {emoji:"🥇",label:"5 PRs",       earned:stats.prs>=5},
+                  {emoji:"📅",label:"Week 5",      earned:week>=5},
+                  {emoji:"🚀",label:"10 weeks done",earned:weeksDone.length>=3},
+                ].map(b=>(
+                  <div key={b.label} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,width:56,opacity:b.earned?1:0.3}}>
+                    <div style={{width:44,height:44,borderRadius:T.r10,background:b.earned?accent.push+"22":T.bgInput,border:`1.5px solid ${b.earned?accent.push:T.border}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,boxShadow:b.earned?`0 2px 8px ${accent.push}30`:"none"}}>{b.emoji}</div>
+                    <div style={{fontSize:9,color:b.earned?accent.push:T.textMuted,fontWeight:b.earned?700:400,textAlign:"center",lineHeight:1.2}}>{b.label}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PROGRAM TAB ──────────────────────────────────────────────────────────────
+function ProgramTab({week,setWeek,phase,phases,phaseKey,accent,getStats,META,setSid,onHistory}){
+  const T=useTheme();
+  const CYCLE_ORDER=["push-1","pull-1","legs-1","push-2","pull-2","legs-2"];
+  const nextSid=CYCLE_ORDER.find(sid=>getStats(sid).pct<1)||null;
+  const stripRef=useRef(null);
+  useEffect(()=>{
+    if(!stripRef.current)return;
+    // Scroll so current week is centred in the strip
+    const btnWidth=33; // 30px + 3px gap
+    const containerWidth=stripRef.current.offsetWidth;
+    const targetScroll=(week-1)*btnWidth - containerWidth/2 + btnWidth/2;
+    stripRef.current.scrollLeft=Math.max(0,targetScroll);
+  },[week]);
+  return(
+    <div className="tab-enter" style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div className="safe-top" style={{background:T.bgHeader,padding:"0 18px 14px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,paddingTop:14}}>
+          <button onClick={()=>setWeek(Math.max(1,week-1))} style={{background:T.bgInput,border:`1px solid ${T.border}`,color:T.text,width:48,height:48,borderRadius:T.r10,fontSize:28,fontWeight:300,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:28,fontWeight:900,letterSpacing:-1,color:T.text}}>WEEK {week}</div>
+            <div style={{fontSize:10,letterSpacing:2,fontWeight:700,color:phase.color,textTransform:"uppercase"}}>{phase.name}</div>
+          </div>
+          <button onClick={()=>setWeek(Math.min(20,week+1))} style={{background:T.bgInput,border:`1px solid ${T.border}`,color:T.text,width:48,height:48,borderRadius:T.r10,fontSize:28,fontWeight:300,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
+        </div>
+        {/* Compact scrollable week strip */}
+        <div ref={stripRef} style={{display:"flex",gap:3,overflowX:"auto",WebkitOverflowScrolling:"touch",paddingBottom:2,scrollbarWidth:"none"}}>
+          {Array.from({length:20},(_,i)=>i+1).map(w=>{
+            const ph=getPhase(w,phases),on=w===week;
+            return <button key={w} onClick={()=>setWeek(w)} style={{width:30,height:30,borderRadius:6,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",padding:0,background:on?ph.color:ph.color+"25",border:`2px solid ${on?ph.color:ph.color+"60"}`}}>
+              <span style={{fontSize:9,fontWeight:800,color:on?"#fff":ph.color}}>{w}</span>
+            </button>;
+          })}
+        </div>
+      </div>
+      <div className="scroll" style={{flex:1,padding:"14px 14px 0"}}>
+        {MUSCLES.map(m=>{
+          const s1=getStats(`${m}-1`),s2=getStats(`${m}-2`);
+          const mc=META[`${m}-1`].color;
+          const isNext1=nextSid===`${m}-1`,isNext2=nextSid===`${m}-2`;
+          return <div key={m} style={{marginBottom:12}}>
+            <div style={{fontSize:9,letterSpacing:3,fontWeight:800,color:T.textSub,marginBottom:5,paddingLeft:2,textTransform:"uppercase"}}>{m}</div>
+            <div style={{display:"flex",gap:8}}>
+              <div style={{flex:1,background:T.bgCard,borderRadius:T.r10,border:`2px solid ${isNext1?mc:mc+"60"}`,boxShadow:isNext1?`0 0 0 3px ${mc}22`:T.shadow,overflow:"hidden",position:"relative"}}>
+                {isNext1&&<div style={{position:"absolute",top:6,right:6,fontSize:8,fontWeight:800,color:mc,background:mc+"18",padding:"2px 6px",borderRadius:4,letterSpacing:0.5,zIndex:1}}>UP NEXT</div>}
+                <HalfCard label="Session 1" color={mc} stats={s1} onOpen={()=>setSid(`${m}-1`)} subtitle="Primary"/>
+              </div>
+              <div style={{flex:1,background:T.bgCard,borderRadius:T.r10,border:`2px ${isNext2?"solid":"dashed"} ${isNext2?mc:mc+"88"}`,boxShadow:isNext2?`0 0 0 3px ${mc}22`:"none",overflow:"hidden",opacity:isNext2?1:0.85,position:"relative"}}>
+                {isNext2&&<div style={{position:"absolute",top:6,right:6,fontSize:8,fontWeight:800,color:mc,background:mc+"18",padding:"2px 6px",borderRadius:4,letterSpacing:0.5,zIndex:1}}>UP NEXT</div>}
+                <HalfCard label="Session 2" color={mc} stats={s2} onOpen={()=>setSid(`${m}-2`)} subtitle="Variations"/>
+              </div>
+            </div>
+          </div>;
+        })}
+        <button onClick={onHistory} style={{width:"100%",background:T.bgCard,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"14px",color:T.textSub,fontSize:13,cursor:"pointer",marginTop:8,marginBottom:16,fontFamily:"inherit",boxShadow:T.shadow}}>
+          📋  View Full Log History
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── REST TIMER ───────────────────────────────────────────────────────────────
+function RestTimer({color,defaultSecs,onDismiss}){
+  const T=useTheme();
+  const endTimeRef=useRef(Date.now()+defaultSecs*1000);
+  const pausedAtRef=useRef(null); // timestamp when paused
+  const rafRef=useRef(null);
+  const beeped=useRef(false);
+  const notifRef=useRef(null);
+  const [remaining,setRemaining]=useState(defaultSecs);
+  const [paused,setPaused]=useState(false);
+
+  // Request notification permission once on mount
+  useEffect(()=>{
+    if("Notification" in window&&Notification.permission==="default"){
+      Notification.requestPermission().catch(()=>{});
+    }
+  },[]);
+
+  const beep=useCallback(()=>{
+    if(beeped.current)return;
+    beeped.current=true;
+    // Foreground: play audio beep
+    try{
+      const ctx=new(window.AudioContext||window.webkitAudioContext)();
+      [0,150,300].forEach(d=>{
+        const o=ctx.createOscillator(),g=ctx.createGain();
+        o.connect(g);g.connect(ctx.destination);
+        o.frequency.value=880;g.gain.value=0.3;
+        o.start(ctx.currentTime+d/1000);
+        o.stop(ctx.currentTime+d/1000+0.12);
+      });
+    }catch(e){}
+    // Background / lock screen: fire a notification
+    if("Notification" in window&&Notification.permission==="granted"){
+      try{
+        notifRef.current=new Notification("Rest complete 💪",{
+          body:"Time to lift — your next set is ready.",
+          silent:false,
+          tag:"ppl-rest-timer",
+        });
+        notifRef.current.onclick=()=>{window.focus();notifRef.current?.close();};
+      }catch(e){}
+    }
+  },[]);
+
+  // RAF loop — calculates remaining from wall-clock endTime
+  const tick=useCallback(()=>{
+    const now=Date.now();
+    const rem=Math.max(0,Math.round((endTimeRef.current-now)/1000));
+    setRemaining(rem);
+    if(rem<=0){beep();return;}
+    rafRef.current=requestAnimationFrame(tick);
+  },[beep]);
+
+  // Start/stop RAF based on paused state
+  useEffect(()=>{
+    if(paused){
+      cancelAnimationFrame(rafRef.current);
+      pausedAtRef.current=Date.now();
+    } else {
+      // If resuming from pause, shift endTime forward by the paused duration
+      if(pausedAtRef.current!==null){
+        const pausedDuration=Date.now()-pausedAtRef.current;
+        endTimeRef.current+=pausedDuration;
+        pausedAtRef.current=null;
+      }
+      rafRef.current=requestAnimationFrame(tick);
+    }
+    return()=>cancelAnimationFrame(rafRef.current);
+  },[paused,tick]);
+
+  // Visibility change — when returning from background, recalculate immediately
+  useEffect(()=>{
+    const onVisible=()=>{
+      if(document.visibilityState==="visible"&&!paused){
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current=requestAnimationFrame(tick);
+      }
+    };
+    document.addEventListener("visibilitychange",onVisible);
+    return()=>document.removeEventListener("visibilitychange",onVisible);
+  },[paused,tick]);
+
+  // Cleanup notification on dismiss
+  useEffect(()=>()=>{
+    cancelAnimationFrame(rafRef.current);
+    notifRef.current?.close();
+  },[]);
+
+  const pct=remaining/defaultSecs;
+  const done=remaining<=0;
+  const mins=Math.floor(remaining/60);
+  const secs=remaining%60;
+  const display=`${mins}:${String(secs).padStart(2,"0")}`;
+
+  return(
+    <div style={{background:T.bgCard,border:`2px solid ${done?"#34c759":color}`,borderRadius:T.r16,padding:"12px 14px",marginBottom:10,display:"flex",alignItems:"center",gap:12,boxShadow:T.shadow}}>
+      <div style={{position:"relative",width:52,height:52,flexShrink:0}}>
+        <svg width="52" height="52" viewBox="0 0 52 52">
+          <circle cx="26" cy="26" r="22" fill="none" stroke={T.bgInput} strokeWidth="4"/>
+          <circle cx="26" cy="26" r="22" fill="none" stroke={done?"#34c759":color} strokeWidth="4"
+            strokeDasharray={`${pct*138} 138`} strokeDashoffset="34.5" strokeLinecap="round"
+            style={{transition:"stroke-dasharray 0.4s linear"}} transform="rotate(-90 26 26)"/>
+        </svg>
+        <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <span style={{fontSize:11,fontWeight:800,color:done?"#34c759":color}}>{done?"✓":display}</span>
+        </div>
+      </div>
+      <div style={{flex:1}}>
+        <div style={{fontSize:13,fontWeight:700,color:T.text}}>{done?"Rest complete!":"Rest timer"}</div>
+        <div style={{fontSize:11,color:T.textSub,marginTop:2}}>
+          {done?"Tap ✕ when ready":paused?"Paused — tap ▶ to resume":"Running…"}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:6}}>
+        {!done&&<button onClick={()=>setPaused(p=>!p)} style={{background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:8,width:34,height:34,cursor:"pointer",fontSize:14,color:T.text,display:"flex",alignItems:"center",justifyContent:"center"}}>{paused?"▶":"⏸"}</button>}
+        <button onClick={onDismiss} style={{background:done?"#34c759":T.bgInput,border:`1px solid ${done?"#34c759":T.border}`,borderRadius:8,width:34,height:34,cursor:"pointer",fontSize:13,color:done?"#fff":T.text,display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700}}>✕</button>
+      </div>
+    </div>
+  );
+}
+
+// ─── NOTE FIELD ───────────────────────────────────────────────────────────────
+function NoteField({note,onChange}){
+  const T=useTheme();
+  const hasNote=!!(note&&note.trim());
+  const [open,setOpen]=useState(hasNote);
+  // If a note gets added externally (e.g. restored), open it
+  useEffect(()=>{if(hasNote)setOpen(true);},[hasNote]);
+  if(open) return(
+    <textarea placeholder="Notes…" value={note} onChange={e=>onChange(e.target.value)}
+      style={{width:"100%",background:T.bgInset,border:`1px solid ${T.border}`,borderRadius:8,color:T.textSub,fontSize:12,fontFamily:"inherit",padding:"7px 10px",resize:"none",outline:"none",boxSizing:"border-box",marginTop:6}} rows={2}/>
+  );
+  return(
+    <button onClick={()=>setOpen(true)}
+      style={{background:"transparent",border:"none",padding:"4px 2px",fontSize:11,color:T.textMuted,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4,marginTop:4}}>
+      <span style={{fontSize:13}}>＋</span> Add note
+    </button>
+  );
+}
+
+// ─── SESSION SCREEN ───────────────────────────────────────────────────────────
+const REST_OPTIONS=[{label:"90s",secs:90},{label:"2m",secs:120},{label:"3m",secs:180},{label:"5m",secs:300}];
+
+function SessionScreen({sid,week,phase,phaseKey,META,getEntry,updSet,updNote,saved,getW1,getW2,phases,rpeAdj,sessionSwapsRef,onBack}){
+  const T=useTheme();
+  const meta=META[sid];
+  const wts=useMemo(()=>meta.slot===1?getW1(meta.muscle):getW2(meta.muscle),[meta,getW1,getW2]);
+  const [restSecs,setRestSecs]=useState(180);
+  const [activeTimer,setActiveTimer]=useState(null);
+  const swapKey=`${sid}|w${week}`;
+  const [swaps,setSwapsState]=useState(()=>sessionSwapsRef.current[swapKey]||{});
+  const setSwaps=updater=>{
+    setSwapsState(prev=>{
+      const next=typeof updater==="function"?updater(prev):updater;
+      sessionSwapsRef.current[swapKey]=next;
+      return next;
+    });
+  };
+  const [openSub,setOpenSub]=useState(null);
+  const targetRpe=PHASE_TARGET_RPE[phaseKey]||8;
+  // Set management
+  const [removeConfirm,setRemoveConfirm]=useState(null); // {exName, idx}
+  const longPressTimer=useRef(null);
+  // Finish session flow
+  const [showFinish,setShowFinish]=useState(false);
+  const [showTemplate,setShowTemplate]=useState(false);
+
+  const handleTick=useCallback((exName,setIdx,currentlyDone,tWgt,tRepMin,fallbackRpe)=>{
+    updSet(sid,week,exName,setIdx,"done",!currentlyDone,tWgt,tRepMin,currentlyDone?undefined:fallbackRpe);
+    if(!currentlyDone)setActiveTimer({exName,setIdx});
+    else if(activeTimer?.exName===exName&&activeTimer?.setIdx===setIdx)setActiveTimer(null);
+  },[sid,week,updSet,activeTimer]);
+
+  const applySwap=(origName,subDef)=>{setSwaps(s=>({...s,[origName]:subDef.name}));setOpenSub(null);};
+  const clearSwap=(origName)=>{setSwaps(s=>{const n={...s};delete n[origName];return n;});};
+
+  const handleRemoveSet=(exName,idx)=>{
+    setRemoveConfirm({exName,idx});
+  };
+
+  const confirmRemoveSet=()=>{
+    if(!removeConfirm)return;
+    const {exName,idx}=removeConfirm;
+    const entry=getEntry(sid,week,exName);
+    const sets=[...(entry.sets||[])];
+    sets.splice(idx,1);
+    // Re-write all sets by updating log directly
+    updSet(sid,week,exName,"_splice",idx,null,null,null,null,sets);
+    setRemoveConfirm(null);
+  };
+
+  const handleFinish=()=>{
+    // Check if any custom set counts differ from programmed
+    const customSets=meta.exercises.some(ex=>{
+      const activeName=swaps[ex.name]||ex.name;
+      const logged=(getEntry(sid,week,activeName).sets||[]).length;
+      const programmed=ex.sets[phaseKey]||3;
+      return logged>0&&logged!==programmed;
+    });
+    if(customSets)setShowTemplate(true);
+    else onBack();
+  };
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",background:T.bg}}>
+      <div className="safe-top" style={{background:T.bgHeader,borderBottom:`2px solid ${meta.color}30`,padding:"0 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:T.backBtn,fontSize:15,cursor:"pointer",paddingTop:14,width:60,textAlign:"left",fontFamily:"inherit",fontWeight:500}}>← Back</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:meta.color,paddingTop:14}}>{meta.label}</div>
+          <div style={{fontSize:10,color:T.textSub,marginTop:2}}>Week {week} · {phase.name}{meta.isS2&&" · Variations"}</div>
+        </div>
+        <div style={{fontSize:10,color:"#34c759",letterSpacing:0.5,width:60,textAlign:"right",fontWeight:600,paddingTop:14,transition:"opacity 0.3s",opacity:saved?1:0}}>Saved ✓</div>
+      </div>
+      <div style={{background:T.bgHeader,borderBottom:`1px solid ${T.border}`,padding:"8px 14px",flexShrink:0,display:"flex",alignItems:"center",gap:8}}>
+        <span style={{fontSize:10,color:T.textSub,flexShrink:0}}>Rest:</span>
+        <div style={{display:"flex",gap:4}}>
+          {REST_OPTIONS.map(o=>{
+            const isActive=restSecs===o.secs;
+            const locked=!!activeTimer;
+            return(
+              <button key={o.secs} onClick={()=>{if(!locked)setRestSecs(o.secs);}}
+                style={{padding:"4px 10px",borderRadius:6,border:`1.5px solid ${isActive?meta.color:T.border}`,background:isActive?meta.color+"18":T.bgInput,color:isActive?meta.color:locked?T.textMuted:T.textSub,fontSize:11,fontWeight:700,cursor:locked?"default":"pointer",fontFamily:"inherit",opacity:locked&&!isActive?0.45:1}}>
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+        {activeTimer&&<span style={{fontSize:9,color:T.textMuted,marginLeft:2}}>locked while running</span>}
+      </div>
+      {/* Sticky rest timer — outside scroll so it stays visible */}
+      {activeTimer&&(
+        <div style={{flexShrink:0,padding:"8px 12px 0",background:T.bg}}>
+          <RestTimer key={`${activeTimer.exName}-${activeTimer.setIdx}`}
+            color={meta.color} defaultSecs={restSecs} onDismiss={()=>setActiveTimer(null)}/>
+        </div>
+      )}
+      <div className="scroll" style={{flex:1,padding:"10px 12px 0"}}>
+        {meta.exercises.map(ex=>{
+          // Resolve active name — may be swapped
+          const swapName=swaps[ex.name];
+          const activeName=swapName||ex.name;
+          const isSwapped=!!swapName;
+
+          // Weight array for active exercise
+          const activeWts=isSwapped
+            ? buildSubWeights(SUBS[ex.name]?.find(s=>s.name===swapName),wts[ex.name])
+            : wts[activeName];
+
+          const tSets=ex.sets[phaseKey]||3,tReps=ex.reps[phaseKey]||"10–12";
+          const tWgt=activeWts?.[week-1]??"—";
+          const tRepMin=tReps.includes("–")?tReps.split("–")[0]:tReps;
+          const rpeRange=PHASE_RPE_RANGE[phaseKey]||"7–8";
+          const rpeLower=parseInt(rpeRange.split("–")[0])||7;
+          const entry=getEntry(sid,week,activeName);
+          const logSets=entry.sets||[];
+          // Pre-fill display sets with programmed values when log is empty
+          const displaySets=logSets.length>0?logSets:Array.from({length:tSets},()=>({
+            weight:tWgt!=="—"?String(tWgt):"",
+            reps:tRepMin,
+            rpe:rpeLower,
+            done:false,
+            _prefilled:true,
+          }));
+          const doneN=displaySets.filter(s=>s?.done).length;
+          const allDone=doneN>=tSets;
+          const subs=SUBS[ex.name]||[];
+          const isOpen=openSub===ex.name;
+
+          return <div key={ex.name} style={{background:T.bgCard,borderRadius:T.r10,padding:"12px 13px",marginBottom:10,border:`1px solid ${isSwapped?meta.color+"66":T.border}`,boxShadow:T.shadow,borderTop:`3px solid ${allDone?meta.color:isSwapped?meta.color+"88":T.border}`}}>
+            {/* Exercise header */}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:4}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,lineHeight:1.3}}>
+                  {activeName}
+                  {isSwapped&&<span style={{fontSize:9,fontWeight:700,color:meta.color,background:meta.color+"18",padding:"2px 6px",borderRadius:4,marginLeft:6,letterSpacing:0.5}}>SUB</span>}
+                </div>
+                {isSwapped&&<div style={{fontSize:10,color:T.textSub,marginTop:1}}>replaces {ex.name}</div>}
+                <div style={{display:"flex",gap:5,flexWrap:"wrap",alignItems:"center",marginTop:4}}>
+                  <span style={{fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,background:ex.type==="compound"?T.backBtn+"22":T.bgInput,color:ex.type==="compound"?T.backBtn:T.textSub,textTransform:"uppercase",letterSpacing:0.5}}>{ex.type}</span>
+                  <span style={{fontSize:11,color:T.textSub}}>{tSets} × {tReps}</span>
+                  <span style={{fontSize:13,fontWeight:800,color:meta.color}}>{tWgt}kg</span>
+                  {tWgt!=="—"&&<span style={{fontSize:10,color:T.textMuted,fontWeight:500}}>{Math.round(parseFloat(tWgt)*2.2046)}lbs</span>}
+                  {(()=>{const adj=rpeAdj[`${sid}|${ex.name}`];if(!adj||Math.abs(adj-1)<0.01)return null;const up=adj>1;return<span style={{fontSize:9,fontWeight:700,color:up?"#34c759":"#f97316",background:up?"#34c75920":"#f9731620",padding:"2px 5px",borderRadius:4}}>{up?"↑":"↓"}RPE adj</span>;})()}
+                </div>
+              </div>
+              <div style={{textAlign:"right",flexShrink:0,paddingLeft:8}}>
+                <div style={{fontSize:17,fontWeight:900,color:allDone?meta.color:T.textMuted,lineHeight:1}}>{doneN}/{logSets.length||tSets}</div>
+                {allDone&&<div style={{fontSize:9,color:meta.color,letterSpacing:1,fontWeight:800}}>DONE</div>}
+              </div>
+            </div>
+
+            {/* Substitute button + picker */}
+            {subs.length>0&&(
+              <div style={{marginBottom:8}}>
+                {!isSwapped?(
+                  <button onClick={()=>setOpenSub(isOpen?null:ex.name)}
+                    style={{background:"transparent",border:`1px dashed ${T.border}`,borderRadius:6,padding:"4px 8px",fontSize:11,color:T.textSub,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4}}>
+                    <span style={{fontSize:12}}>⇄</span> Substitute exercise
+                  </button>
+                ):(
+                  <button onClick={()=>clearSwap(ex.name)}
+                    style={{background:meta.color+"15",border:`1px solid ${meta.color}55`,borderRadius:6,padding:"4px 8px",fontSize:11,color:meta.color,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",gap:4,fontWeight:600}}>
+                    <span style={{fontSize:12}}>✕</span> Remove substitution
+                  </button>
+                )}
+                {isOpen&&!isSwapped&&(
+                  <div style={{marginTop:5,background:T.bgInset,borderRadius:T.r10,border:`1px solid ${T.border}`,overflow:"hidden"}}>
+                    {subs.map((sub,si)=>{
+                      const subWts=buildSubWeights(sub,wts[ex.name]);
+                      const subWgt=subWts[week-1]??0;
+                      return <button key={si} onClick={()=>applySwap(ex.name,sub)}
+                        style={{width:"100%",background:"transparent",border:"none",borderBottom:si<subs.length-1?`1px solid ${T.border}`:"none",padding:"10px 12px",cursor:"pointer",textAlign:"left",fontFamily:"inherit",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8}}>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:13,fontWeight:600,color:T.text,marginBottom:1}}>{sub.name}</div>
+                          <div style={{fontSize:10,color:T.textSub}}>{sub.note}</div>
+                        </div>
+                        <div style={{textAlign:"right",flexShrink:0}}>
+                          <div style={{fontSize:13,fontWeight:800,color:meta.color}}>{subWgt}kg</div>
+                          <div style={{fontSize:9,color:T.textMuted}}>{tReps} reps</div>
+                        </div>
+                      </button>;
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Set rows */}
+            <div style={{background:T.bgInset,borderRadius:8,overflow:"hidden",marginBottom:8}}>
+              {/* Column headers */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 72px 40px",gap:4,padding:"5px 10px",borderBottom:`1px solid ${T.border}`}}>
+                {["WEIGHT","REPS","RPE","✓"].map(h=><span key={h} style={{fontSize:9,letterSpacing:0.8,color:T.textMuted,fontWeight:700,textAlign:"center",textTransform:"uppercase"}}>{h}</span>)}
+              </div>
+              {displaySets.map((_,i)=>{
+                const sd=displaySets[i]||{},isDone=!!sd.done;
+                const isPrefilled=!!sd._prefilled;
+                const ic=isDone?T.inputDone:isPrefilled?T.textMuted:T.inputUndone;
+                const rpe=sd.rpe?String(sd.rpe):"";
+                const rpeNum=parseInt(rpe)||0;
+                const rpeColor=rpeNum>=9?"#ef4444":rpeNum>=7?meta.color:T.textSub;
+                const isActiveSet=activeTimer?.exName===activeName&&activeTimer?.setIdx===i;
+                const hasRpe=!!rpe&&!isPrefilled;
+                // Commit pre-filled row to log before updating
+                const commitIfPrefilled=(field,val)=>{
+                  if(isPrefilled){
+                    // Write the full pre-filled row first, then the change
+                    updSet(sid,week,activeName,i,"_prefill_commit",null,sd.weight,sd.reps,sd.rpe);
+                  }
+                  updSet(sid,week,activeName,i,field,val,tWgt,tRepMin,rpeLower);
+                };
+                const isExtra=i>=tSets;
+                return <React.Fragment key={i}>
+                  <div
+                    style={{display:"grid",gridTemplateColumns:"1fr 1fr 72px 40px",gap:4,padding:"5px 10px",alignItems:"center",
+                      borderBottom:(!isDone||!rpe||Math.abs((parseInt(rpe)||0)-targetRpe)<1)?`1px solid ${T.borderMid}`:"none",
+                      background:isDone?meta.color+"14":isActiveSet?meta.color+"08":isExtra?T.bgInset:T.bgRow,
+                      borderLeft:`3px solid ${isDone?meta.color:isActiveSet?meta.color+"80":isExtra?meta.color+"40":"transparent"}`}}
+                    onPointerDown={()=>{longPressTimer.current=setTimeout(()=>handleRemoveSet(activeName,i),600);}}
+                    onPointerUp={()=>clearTimeout(longPressTimer.current)}
+                    onPointerLeave={()=>clearTimeout(longPressTimer.current)}
+                  >
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                      <input type="text" inputMode="decimal" placeholder={String(tWgt)} value={sd.weight??""} onChange={e=>commitIfPrefilled("weight",e.target.value)}
+                        style={{background:T.bgInput,border:`1.5px solid ${isDone?meta.color+"55":isPrefilled?T.border+"80":T.border}`,borderRadius:8,fontSize:16,fontWeight:700,fontFamily:"inherit",padding:"8px 4px",textAlign:"center",width:"100%",outline:"none",color:ic,height:40,opacity:isPrefilled?0.6:1}}/>
+                      {(()=>{const w=parseFloat(sd.weight||tWgt);return !isNaN(w)&&w>0?<span style={{fontSize:8,color:T.textMuted,lineHeight:1}}>{Math.round(w*2.2046)}lbs</span>:null;})()}
+                    </div>
+                    <input type="number" inputMode="numeric" placeholder={tRepMin} value={sd.reps??""} onChange={e=>commitIfPrefilled("reps",e.target.value)}
+                      style={{background:T.bgInput,border:`1.5px solid ${isDone?meta.color+"55":isPrefilled?T.border+"80":T.border}`,borderRadius:8,fontSize:16,fontWeight:700,fontFamily:"inherit",padding:"8px 4px",textAlign:"center",width:"100%",outline:"none",color:ic,height:40,opacity:isPrefilled?0.6:1}}/>
+                    <div style={{display:"flex",alignItems:"center",background:T.bgInput,borderRadius:8,border:`1px solid ${T.border}`,height:40,overflow:"hidden",opacity:isDone?1:isPrefilled?0.5:0.5}}>
+                      <button onClick={()=>commitIfPrefilled("rpe",Math.max(1,hasRpe?rpeNum-1:rpeLower))}
+                        style={{background:"transparent",border:"none",borderRight:`1px solid ${T.border}`,width:24,height:"100%",cursor:"pointer",fontSize:16,color:T.textSub,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}}>−</button>
+                      <div style={{flex:1,textAlign:"center",fontSize:hasRpe?14:11,fontWeight:hasRpe?800:500,color:isDone&&hasRpe?rpeColor:T.textMuted,letterSpacing:hasRpe?0:-0.3}}>
+                        {hasRpe?rpe:rpeRange}
+                      </div>
+                      <button onClick={()=>commitIfPrefilled("rpe",Math.min(10,hasRpe?rpeNum+1:rpeLower))}
+                        style={{background:"transparent",border:"none",borderLeft:`1px solid ${T.border}`,width:24,height:"100%",cursor:"pointer",fontSize:16,color:T.textSub,display:"flex",alignItems:"center",justifyContent:"center",padding:0,flexShrink:0}}>+</button>
+                    </div>
+                    <button onClick={()=>{if(isPrefilled)updSet(sid,week,activeName,i,"_prefill_commit",null,sd.weight,sd.reps,sd.rpe);handleTick(activeName,i,isDone,tWgt,tRepMin,rpeLower);}}
+                      style={{borderRadius:8,fontSize:15,fontWeight:900,width:38,height:40,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",transition:"all 0.15s",background:isDone?meta.color:T.bgInput,border:`2px solid ${isDone?meta.color:T.border}`,color:isDone?"#fff":T.textMuted}}>
+                      {isDone?"✓":"○"}
+                    </button>
+                  </div>
+                  {isDone&&hasRpe&&(()=>{
+                    const diff=rpeNum-targetRpe;
+                    if(Math.abs(diff)<1)return null;
+                    const tooHard=diff>0,strong=Math.abs(diff)>=2;
+                    const msg=tooHard?(strong?"Very hard — consider dropping weight next set":"Slightly above target — monitor next set"):(strong?"Too easy — go heavier next set or next week":"Below target — you have more in the tank");
+                    const col=tooHard?"#ef4444":"#34c759";
+                    return <div style={{fontSize:10,color:col,fontWeight:600,padding:"4px 10px 5px",borderBottom:`1px solid ${T.borderMid}`,background:isDone?meta.color+"14":T.bgRow,display:"flex",alignItems:"center",gap:5}}>
+                      <span>{tooHard?"⚠️":"💪"}</span>{msg}
+                    </div>;
+                  })()}
+                </React.Fragment>;
+              })}
+            </div>
+
+            {/* Add Set button */}
+            <button onClick={()=>updSet(sid,week,activeName,0,"_init",true)}
+              style={{width:"100%",background:"transparent",border:`1px dashed ${meta.color}55`,borderRadius:8,padding:"8px",fontSize:11,fontWeight:600,color:meta.color,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:6,marginBottom:6}}>
+              <span style={{fontSize:14}}>＋</span> Add set {displaySets.length>tSets&&<span style={{fontSize:10,opacity:0.7}}>({displaySets.length} total, {tSets} programmed)</span>}
+            </button>
+            {displaySets.length>tSets&&<div style={{fontSize:10,color:T.textMuted,textAlign:"center",marginBottom:4}}>Long-press any set to remove it</div>}
+
+            <NoteField note={entry.note||""} onChange={v=>updNote(sid,week,activeName,v)}/>
+          </div>;
+        })}
+
+        {/* Finish Session button */}
+        <button onClick={()=>setShowFinish(true)}
+          style={{width:"100%",background:meta.color,border:"none",borderRadius:T.r16,padding:"16px",color:"#fff",fontSize:15,fontWeight:800,cursor:"pointer",fontFamily:"inherit",marginTop:6,marginBottom:8,display:"flex",alignItems:"center",justifyContent:"center",gap:8,boxShadow:`0 4px 16px ${meta.color}44`}}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Finish Session
+        </button>
+        <div style={{height:24}}/>
+      </div>
+
+      {/* Remove set confirmation */}
+      {removeConfirm&&(
+        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:100,padding:"0 24px"}}>
+          <div style={{background:T.bgCard,borderRadius:T.r16,padding:"24px",width:"100%",maxWidth:320,boxShadow:"0 8px 32px rgba(0,0,0,0.3)"}}>
+            <div style={{fontSize:16,fontWeight:700,color:T.text,marginBottom:8}}>Remove this set?</div>
+            <div style={{fontSize:13,color:T.textSub,marginBottom:20}}>Set {removeConfirm.idx+1} will be permanently removed from this session.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setRemoveConfirm(null)}
+                style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:600,cursor:"pointer",color:T.text,fontFamily:"inherit"}}>No</button>
+              <button onClick={confirmRemoveSet}
+                style={{flex:1,background:"#ef4444",border:"none",borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>Yes, Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finish session confirmation */}
+      {showFinish&&(
+        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"flex-end",zIndex:100}}>
+          <div style={{background:T.bgCard,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",boxShadow:"0 -8px 32px rgba(0,0,0,0.3)"}}>
+            <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:6}}>Finish {meta.label}?</div>
+            <div style={{fontSize:13,color:T.textSub,marginBottom:20,lineHeight:1.5}}>Your session will be marked complete and RPE adjustments will be saved.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>setShowFinish(false)}
+                style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"13px",fontSize:14,fontWeight:600,cursor:"pointer",color:T.text,fontFamily:"inherit"}}>Cancel</button>
+              <button onClick={()=>{setShowFinish(false);handleFinish();}}
+                style={{flex:2,background:meta.color,border:"none",borderRadius:T.r10,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>Finish Session</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save template prompt */}
+      {showTemplate&&(
+        <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"flex-end",zIndex:100}}>
+          <div style={{background:T.bgCard,borderRadius:"20px 20px 0 0",padding:"24px 20px",width:"100%",boxShadow:"0 -8px 32px rgba(0,0,0,0.3)"}}>
+            <div style={{fontSize:17,fontWeight:800,color:T.text,marginBottom:6}}>Save custom set counts?</div>
+            <div style={{fontSize:13,color:T.textSub,marginBottom:6,lineHeight:1.5}}>You used a different number of sets than programmed. Would you like to save these as your new defaults for this session?</div>
+            <div style={{fontSize:11,color:T.textMuted,marginBottom:20}}>If not saved, next week's session will use the original programmed set counts.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{setShowTemplate(false);onBack();}}
+                style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"13px",fontSize:13,fontWeight:600,cursor:"pointer",color:T.text,fontFamily:"inherit",lineHeight:1.2}}>
+                No, keep original
+              </button>
+              <button onClick={()=>{
+                // TODO: persist template — for now just acknowledge and go back
+                setShowTemplate(false);
+                onBack();
+              }} style={{flex:1,background:meta.color,border:"none",borderRadius:T.r10,padding:"13px",fontSize:13,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit",lineHeight:1.2}}>
+                Save as template
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// ─── EXERCISE HISTORY CHART ───────────────────────────────────────────────────
+function ExerciseHistoryChart({exName,allLog,phases,accent,onBack}){
+  const T=useTheme();
+  const exMuscle=useMemo(()=>{
+    for(const m of ["push","pull","legs"]){
+      if(BASE_EX[m]?.some(e=>e.name===exName))return m;
+      if(S2_EX[m]?.some(e=>e.name===exName))return m;
+    }
+    return "push";
+  },[exName]);
+  const exColor=exMuscle==="push"?accent.push:exMuscle==="pull"?accent.pull:accent.legs;
+  // Gather all logged sets for this exercise across all weeks and sessions
+  const history=useMemo(()=>{
+    const entries=[];
+    Object.entries(allLog).forEach(([key,val])=>{
+      if(!key.includes(`|${exName}`))return;
+      // Handle both "push-1|w3|ExName" and "b1|push-1|w3|ExName"
+      const m=key.match(/(?:b\d+\|)?([a-z]+-[12])\|w(\d+)\|/);
+      if(!m)return;
+      const sid=m[1],wk=parseInt(m[2]);
+      const done=(val.sets||[]).filter(s=>s?.done&&s.weight);
+      if(!done.length)return;
+      const maxW=Math.max(...done.map(s=>parseFloat(s.weight)||0));
+      const totalVol=done.reduce((s,x)=>(parseFloat(x.weight)||0)*(parseFloat(x.reps)||0)+s,0);
+      const avgRpeVal=done.filter(s=>s.rpe).length>=1?done.filter(s=>s.rpe).reduce((s,x)=>s+parseInt(x.rpe),0)/done.filter(s=>s.rpe).length:null;
+      // Label archived entries so chart can distinguish blocks
+      const isArchived=key.startsWith("b");
+      const blockLabel=isArchived?key.match(/^b(\d+)/)?.[1]:null;
+      entries.push({wk,sid,maxW,totalVol,avgRpe:avgRpeVal,sets:done,blockLabel});
+    });
+    return entries.sort((a,b)=>a.wk-b.wk||a.sid.localeCompare(b.sid));
+  },[allLog,exName]);
+
+  const allWeights=history.map(h=>h.maxW);
+  const pb=allWeights.length?Math.max(...allWeights):0;
+  const lastEntry=history[history.length-1];
+
+  // Chart: max weight per week
+  const weeks=[...new Set(history.map(h=>h.wk))].sort((a,b)=>a-b);
+  const maxWPerWeek=Object.fromEntries(weeks.map(w=>[w,Math.max(...history.filter(h=>h.wk===w).map(h=>h.maxW))]));
+  const chartMin=pb?Math.max(0,Math.min(...Object.values(maxWPerWeek))*0.9):0;
+  const chartMax=pb?pb*1.05:100;
+  const scaleY=v=>Math.round(((v-chartMin)/(chartMax-chartMin))*64);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",background:T.bg}}>
+      <div className="safe-top" style={{background:T.bgHeader,borderBottom:`1px solid ${T.border}`,padding:"0 16px 12px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:T.backBtn,fontSize:15,cursor:"pointer",paddingTop:14,fontFamily:"inherit",fontWeight:500,flexShrink:0}}>← Back</button>
+        <div style={{paddingTop:14,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:800,color:T.text,lineHeight:1.3}}>{exName}</div>
+          <div style={{fontSize:10,color:T.textSub,marginTop:2}}>{history.length} sessions logged</div>
+        </div>
+      </div>
+      <div className="scroll" style={{flex:1,padding:"14px 14px 0"}}>
+        {history.length===0&&(
+          <div style={{color:T.textSub,textAlign:"center",marginTop:60,fontSize:14}}>No sets logged for this exercise yet.</div>
+        )}
+        {history.length>0&&<>
+          {/* PB + last session summary */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
+            <div style={{background:T.bgCard,borderRadius:T.r10,padding:"14px",boxShadow:T.shadow,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:10,color:T.textSub,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>Personal Best</div>
+              <div style={{fontSize:22,fontWeight:900,color:exColor}}>{pb}kg</div>
+              <div style={{fontSize:10,color:T.textMuted,marginTop:2}}>Week {history.find(h=>h.maxW===pb)?.wk}</div>
+            </div>
+            <div style={{background:T.bgCard,borderRadius:T.r10,padding:"14px",boxShadow:T.shadow,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:10,color:T.textSub,marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>Last Session</div>
+              <div style={{fontSize:22,fontWeight:900,color:T.text}}>{lastEntry?.maxW}kg</div>
+              <div style={{fontSize:10,color:T.textMuted,marginTop:2}}>Week {lastEntry?.wk} · {lastEntry?.sets.length} sets</div>
+            </div>
+          </div>
+
+          {/* Weight over time chart */}
+          {weeks.length>1&&(
+            <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",marginBottom:14,boxShadow:T.shadow,border:`1px solid ${T.border}`}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>Max Weight Per Week</div>
+              <div style={{position:"relative",height:80,marginBottom:8}}>
+                <svg width="100%" height="80" style={{overflow:"visible"}}>
+                  {/* Grid lines */}
+                  {[0,32,64].map(y=>(
+                    <line key={y} x1="0" y1={80-y} x2="100%" y2={80-y} stroke={T.border} strokeWidth="1" opacity="0.5"/>
+                  ))}
+                  {/* Weight line */}
+                  {(()=>{
+                    const pts=weeks.map((w,xi)=>{
+                      const v=maxWPerWeek[w];
+                      const x=(xi/(weeks.length-1))*100;
+                      const y=80-scaleY(v);
+                      return{x,y,v,w};
+                    });
+                    const d=pts.map((p,i)=>`${i===0?"M":"L"}${p.x}% ${p.y}`).join(" ");
+                    const ph=getPhase(pts[pts.length-1]?.w||1,phases);
+                    return <g>
+                      <path d={d} fill="none" stroke={exColor} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                      {pts.map((p,i)=>{
+                        const isPb=p.v===pb;
+                        return <g key={i}>
+                          <circle cx={`${p.x}%`} cy={p.y} r={isPb?5:3} fill={isPb?"#f97316":exColor}/>
+                          {isPb&&<text x={`${p.x}%`} y={p.y-8} textAnchor="middle" fontSize="9" fill="#f97316" fontWeight="800">PB</text>}
+                        </g>;
+                      })}
+                    </g>;
+                  })()}
+                </svg>
+              </div>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                {weeks.map(w=>(
+                  <div key={w} style={{fontSize:8,color:T.textMuted,fontWeight:400}}>W{w}</div>
+                ))}
+              </div>
+              {/* Y axis labels */}
+              <div style={{display:"flex",justifyContent:"space-between",marginTop:8,paddingTop:8,borderTop:`1px solid ${T.borderMid}`}}>
+                <div style={{fontSize:10,color:T.textSub}}>Low: {Math.min(...Object.values(maxWPerWeek))}kg</div>
+                <div style={{fontSize:10,color:exColor,fontWeight:700}}>Best: {pb}kg</div>
+              </div>
+            </div>
+          )}
+
+          {/* Volume trend */}
+          {weeks.length>1&&(()=>{
+            const volPerWeek=Object.fromEntries(weeks.map(w=>[w,history.filter(h=>h.wk===w).reduce((s,h)=>s+h.totalVol,0)]));
+            const maxV=Math.max(...Object.values(volPerWeek));
+            return(
+              <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",marginBottom:14,boxShadow:T.shadow,border:`1px solid ${T.border}`}}>
+                <div style={{fontSize:11,fontWeight:700,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:12}}>Volume Load Per Week (kg×reps)</div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:4,height:52}}>
+                  {weeks.map(w=>{
+                    const v=volPerWeek[w]||0;
+                    const h=maxV>0?Math.max(4,(v/maxV)*48):4;
+                    const ph=getPhase(w,phases);
+                    return <div key={w} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                      <div style={{width:"100%",height:h,background:ph.color+"88",borderRadius:"3px 3px 0 0",minHeight:4}}/>
+                      <div style={{fontSize:7,color:T.textMuted}}>W{w}</div>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* All sessions list */}
+          <div style={{fontSize:9,letterSpacing:3,color:T.textSub,marginBottom:8,textTransform:"uppercase",fontWeight:700}}>All Sessions</div>
+          {[...history].reverse().map((h,i)=>{
+            const ph=getPhase(h.wk,phases);
+            return <div key={i} style={{background:T.bgCard,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"11px 13px",marginBottom:6,boxShadow:T.shadow}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text}}>Week {h.wk}</div>
+                <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                  {h.avgRpe&&<span style={{fontSize:10,color:parseInt(h.avgRpe)>=9?"#ef4444":exColor,fontWeight:700}}>RPE {h.avgRpe.toFixed(1)}</span>}
+                  <span style={{fontSize:9,background:ph.color+"20",color:ph.color,padding:"2px 7px",borderRadius:3,fontWeight:700}}>{ph.name}</span>
+                </div>
+              </div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                {h.sets.map((s,si)=>(
+                  <div key={si} style={{background:T.bgInput,borderRadius:6,padding:"4px 9px",fontSize:12}}>
+                    <span style={{color:T.text,fontWeight:700}}>{s.weight}kg</span>
+                    <span style={{color:T.textMuted}}> × </span>
+                    <span style={{color:T.text}}>{s.reps||"—"}</span>
+                    {s.rpe&&<span style={{color:parseInt(s.rpe)>=9?"#ef4444":exColor,fontWeight:700}}> @{s.rpe}</span>}
+                  </div>
+                ))}
+              </div>
+            </div>;
+          })}
+        </>}
+        <div className="safe-bottom" style={{height:24}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── HISTORY SCREEN ───────────────────────────────────────────────────────────
+function HistoryScreen({log,phases,META,blocks,accent,onBack}){
+  const T=useTheme();
+  const [selectedEx,setSelectedEx]=useState(null);
+
+  // Combine current log with all archived block logs for the chart
+  const allLog=useMemo(()=>{
+    const combined={};
+    // Archived blocks first — prefix keys with block number to avoid collisions
+    (blocks||[]).forEach(b=>{
+      Object.entries(b.log||{}).forEach(([k,v])=>{combined[`b${b.blockNum}|${k}`]=v;});
+    });
+    // Current block — use keys as-is
+    Object.entries(log).forEach(([k,v])=>{combined[k]=v;});
+    return combined;
+  },[log,blocks]);
+
+  const entries=useMemo(()=>Object.entries(log)
+    .filter(([,v])=>v.sets?.some(s=>s?.done))
+    .map(([key,val])=>{const p=key.split("|");return{sid:p[0],week:parseInt(p[1].replace("w","")),ex:p.slice(2).join("|"),...val};})
+    .sort((a,b)=>b.week-a.week||a.sid.localeCompare(b.sid))
+  ,[log]);
+  const byWeek=useMemo(()=>{const bw={};entries.forEach(e=>{if(!bw[e.week])bw[e.week]=[];bw[e.week].push(e);});return bw;},[entries]);
+
+  if(selectedEx){
+    return <ExerciseHistoryChart exName={selectedEx} allLog={allLog} phases={phases} accent={accent} onBack={()=>setSelectedEx(null)}/>;
+  }
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",height:"100%",background:T.bg}}>
+      <div className="safe-top" style={{background:T.bgHeader,borderBottom:`1px solid ${T.border}`,padding:"0 16px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <button onClick={onBack} style={{background:"none",border:"none",color:T.backBtn,fontSize:15,cursor:"pointer",paddingTop:14,width:60,textAlign:"left",fontFamily:"inherit",fontWeight:500}}>← Back</button>
+        <div style={{fontSize:13,fontWeight:800,letterSpacing:1,textTransform:"uppercase",color:T.text,paddingTop:14}}>LOG HISTORY</div>
+        <div style={{width:60}}/>
+      </div>
+      <div className="scroll" style={{flex:1,padding:"12px 12px 0"}}>
+        {/* Archived blocks */}
+        {(blocks||[]).map(b=>{
+          const blockEntries=Object.entries(b.log||{})
+            .filter(([,v])=>v.sets?.some(s=>s?.done))
+            .map(([key,val])=>{const p=key.split("|");return{week:parseInt(p[1].replace("w","")),ex:p.slice(2).join("|"),...val};})
+            .sort((a,b2)=>b2.week-a.week);
+          const blockByWeek={};
+          blockEntries.forEach(e=>{if(!blockByWeek[e.week])blockByWeek[e.week]=[];blockByWeek[e.week].push(e);});
+          return(
+            <div key={b.blockNum} style={{marginBottom:20}}>
+              <div style={{fontSize:11,fontWeight:800,letterSpacing:2,color:T.textMuted,marginBottom:8,display:"flex",alignItems:"center",gap:8,textTransform:"uppercase"}}>
+                <div style={{flex:1,height:1,background:T.border}}/>
+                <span>Block {b.blockNum} Archive</span>
+                <div style={{flex:1,height:1,background:T.border}}/>
+              </div>
+              {Object.entries(blockByWeek).sort((a,b2)=>b2[0]-a[0]).map(([wk,wkE])=>{
+                const ph=getPhase(parseInt(wk),phases);
+                return <div key={wk} style={{marginBottom:16,opacity:0.85}}>
+                  <div style={{fontSize:11,fontWeight:800,letterSpacing:2,color:ph.color,marginBottom:8,display:"flex",alignItems:"center",gap:8,textTransform:"uppercase"}}>
+                    Week {wk}<span style={{fontSize:9,background:ph.color+"20",color:ph.color,padding:"2px 7px",borderRadius:3}}>{ph.name}</span>
+                  </div>
+                  {wkE.map((e,i)=>{
+                    const done=e.sets.filter(s=>s?.done);
+                    return <div key={i} style={{background:T.bgCard,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"10px 13px",marginBottom:5,boxShadow:T.shadow}}>
+                      <div style={{fontSize:12,fontWeight:700,color:T.textSub,marginBottom:5}}>{e.ex}</div>
+                      <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                        {done.map((s,si)=>(
+                          <div key={si} style={{background:T.bgInput,borderRadius:6,padding:"3px 8px",fontSize:11}}>
+                            <span style={{color:T.text,fontWeight:700}}>{s.weight||"—"}kg</span>
+                            <span style={{color:T.textMuted}}> × </span>
+                            <span style={{color:T.text}}>{s.reps||"—"}</span>
+                            {s.rpe&&<span style={{color:T.textSub,fontWeight:600}}> @{s.rpe}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>;
+                  })}
+                </div>;
+              })}
+            </div>
+          );
+        })}
+
+        {/* Current block */}
+        {Object.keys(byWeek).length===0&&(blocks||[]).length===0&&(
+          <div style={{color:T.textSub,textAlign:"center",marginTop:60,fontSize:14}}>No sets logged yet.</div>
+        )}
+        {Object.keys(byWeek).length>0&&(
+          <>
+            {(blocks||[]).length>0&&(
+              <div style={{fontSize:11,fontWeight:800,letterSpacing:2,color:T.textSub,marginBottom:12,display:"flex",alignItems:"center",gap:8,textTransform:"uppercase"}}>
+                <div style={{flex:1,height:1,background:T.border}}/>
+                <span>Current Block</span>
+                <div style={{flex:1,height:1,background:T.border}}/>
+              </div>
+            )}
+            {Object.entries(byWeek).sort((a,b)=>b[0]-a[0]).map(([wk,wkE])=>{
+              const ph=getPhase(parseInt(wk),phases);
+              return <div key={wk} style={{marginBottom:24}}>
+                <div style={{fontSize:11,fontWeight:800,letterSpacing:2,color:ph.color,marginBottom:10,display:"flex",alignItems:"center",gap:8,textTransform:"uppercase"}}>
+                  Week {wk}<span style={{fontSize:9,background:ph.color+"20",color:ph.color,padding:"2px 7px",borderRadius:3}}>{ph.name}</span>
+                </div>
+                {wkE.map((e,i)=>{
+                  const sm=META[e.sid],color=sm?.color||"#888",done=e.sets.filter(s=>s?.done);
+                  return <div key={i} style={{background:T.bgCard,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"11px 13px",marginBottom:6,boxShadow:T.shadow}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:7}}>
+                      <button onClick={()=>setSelectedEx(e.ex)}
+                        style={{background:"none",border:"none",padding:0,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>
+                        <span style={{fontSize:13,fontWeight:700,color:T.backBtn,textDecoration:"underline",textDecorationColor:T.backBtn+"44"}}>{e.ex}</span>
+                      </button>
+                      <div style={{fontSize:9,fontWeight:800,background:color+"20",color,padding:"2px 8px",borderRadius:4,letterSpacing:0.5}}>{sm?.label||e.sid}</div>
+                    </div>
+                    <div style={{display:"flex",flexWrap:"wrap",gap:5}}>
+                      {done.map((s,si)=>(
+                        <div key={si} style={{background:T.bgInput,borderRadius:6,padding:"4px 9px",fontSize:12}}>
+                          <span style={{color:T.textSub,fontSize:10}}>S{si+1} </span>
+                          <span style={{color:T.text,fontWeight:700}}>{s.weight||"—"}kg</span>
+                          <span style={{color:T.textMuted}}> × </span>
+                          <span style={{color:T.text}}>{s.reps||"—"}</span>
+                          {s.rpe&&<span style={{color:parseInt(s.rpe)>=9?"#ef4444":color,fontWeight:700}}> @{s.rpe}</span>}
+                        </div>
+                      ))}
+                    </div>
+                    {e.note&&<div style={{fontSize:11,color:T.textSub,marginTop:6,fontStyle:"italic"}}>"{e.note}"</div>}
+                  </div>;
+                })}
+              </div>;
+            })}
+          </>
+        )}
+        <div className="safe-bottom" style={{height:24}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── MAXES TAB ────────────────────────────────────────────────────────────────
+// Pre-compute which S2 exercises each S1 exercise drives (from S2_MAP)
+const S1_DRIVES_S2=(()=>{
+  const map={};
+  Object.values(S2_MAP).forEach(mappings=>{
+    mappings.forEach(m=>{
+      if(!map[m.src])map[m.src]=[];
+      if(!map[m.src].includes(m.s2))map[m.src].push(m.s2);
+    });
+  });
+  return map;
+})();
+
+const MUSCLE_GROUPS=[
+  {key:"push",label:"Push",exercises:["Barbell Bench Press","Barbell Shoulder Press","Cable Standing Chest Press","Cable Tricep Pushdown (Single Arm)","Cable Bent-Over Tricep Extension","Dumbbell Lateral Raise"]},
+  {key:"pull",label:"Pull",exercises:["Machine Lat Pulldown","Cable Seated Row","Cable Pullover with Rope","Dumbbell Preacher Curl","Barbell Reverse Curl","Dumbbell Lateral Raise (Rear Delt)","Machine Seated Reverse Fly"]},
+  {key:"legs",label:"Legs",exercises:["Sled 45° Leg Press","Machine Single Leg Extension","Machine Standing Leg Curl","Smith Machine Calf Raise","Machine Seated Hip Adduction","Machine Seated Hip Abduction"]},
+];
+function MaxesTab({maxes,onSave}){
+  const T=useTheme();
+  const accent=T.accent;
+  const MC={push:accent.push,pull:accent.pull,legs:accent.legs};
+  const [draft,setDraft]=useState(()=>Object.fromEntries(Object.entries(maxes).map(([k,v])=>[k,{weight:String(v.weight||""),reps:String(v.reps||""),muscle:v.muscle}])));
+  const [confirmed,setConfirmed]=useState(false);
+  const [showConfirm,setShowConfirm]=useState(false);
+  // Sync draft if maxes change from outside (e.g. after a recalculate)
+  useEffect(()=>{
+    setDraft(Object.fromEntries(Object.entries(maxes).map(([k,v])=>[k,{weight:String(v.weight||""),reps:String(v.reps||""),muscle:v.muscle}])));
+  },[maxes]);
+  const upd=(ex,f,v)=>{if(f==="weight")v=v.replace(",",".");setDraft(d=>({...d,[ex]:{...d[ex],[f]:v}}));};
+  const [validationErr,setValidationErr]=useState(null);
+  const handleSubmit=()=>{
+    const out={};let ok=true;let missing=[];
+    Object.entries(draft).forEach(([ex,{weight,reps,muscle}])=>{
+      const w=parseFloat(weight),r=parseFloat(reps);
+      if(!w||!r||w<=0||r<=0){ok=false;missing.push(ex);return;}
+      out[ex]={weight:w,reps:r,muscle};
+    });
+    if(!ok){
+      setValidationErr(`Missing values for: ${missing.slice(0,2).join(", ")}${missing.length>2?` + ${missing.length-2} more`:""}`);
+      setTimeout(()=>setValidationErr(null),4000);
+      return;
+    }
+    setValidationErr(null);
+    onSave(out);setConfirmed(true);setShowConfirm(false);setTimeout(()=>setConfirmed(false),3000);
+  };
+  const est1rm=ex=>{const d=draft[ex];const w=parseFloat(d?.weight),r=parseFloat(d?.reps);if(!w||!r)return null;return Math.round(epley(w,r));};
+  return(
+    <div className="tab-enter" style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div className="safe-top" style={{background:T.bgHeader,padding:"0 18px 14px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",paddingTop:14}}>
+          <div style={{fontSize:22,fontWeight:800,color:T.text}}>My Maxes</div>
+          {confirmed&&<div style={{fontSize:12,color:"#34c759",fontWeight:600,paddingBottom:2}}>✓ Updated!</div>}
+        </div>
+        <div style={{fontSize:12,color:T.textSub,marginTop:4,lineHeight:1.5}}>Enter your current max weight and reps for each exercise, then scroll down to recalculate the program.</div>
+      </div>
+      <div className="scroll" style={{flex:1,padding:"14px 14px 0"}}>
+        {MUSCLE_GROUPS.map(mg=>{
+          const mc=MC[mg.key];
+          return <div key={mg.key} style={{marginBottom:20}}>
+            <div style={{fontSize:11,fontWeight:800,color:mc,letterSpacing:2,textTransform:"uppercase",marginBottom:8,display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:8,height:8,borderRadius:2,background:mc}}/>{mg.label}
+            </div>
+            {mg.exercises.map(ex=>{
+              const d=draft[ex]||{weight:"",reps:"",muscle:mg.key},orm=est1rm(ex);
+              const drives=S1_DRIVES_S2[ex];
+              return <div key={ex} style={{background:T.bgCard,borderRadius:T.r10,padding:"12px 14px",marginBottom:8,border:`1px solid ${T.border}`,boxShadow:T.shadow}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:drives?4:8}}>
+                  <div style={{fontSize:13,fontWeight:600,color:T.text,flex:1,paddingRight:8}}>{ex}</div>
+                  {orm&&<div style={{fontSize:11,fontWeight:700,color:mc,background:mc+"20",padding:"2px 8px",borderRadius:6,flexShrink:0}}>~{orm}kg 1RM</div>}
+                </div>
+                {drives&&(
+                  <div style={{fontSize:10,color:T.textMuted,marginBottom:8,display:"flex",alignItems:"center",gap:4}}>
+                    <span style={{color:mc,fontWeight:600}}>→</span>
+                    <span>drives <span style={{color:mc,fontWeight:600}}>{drives[0]}</span>{drives.length>1?` + ${drives.length-1} more`:""} in Session 2</span>
+                  </div>
+                )}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                  <div>
+                    <div style={{fontSize:9,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:4,fontWeight:600}}>Max Weight (kg)</div>
+                    <input type="text" inputMode="decimal" placeholder="e.g. 100" value={d.weight} onChange={e=>upd(ex,"weight",e.target.value)}
+                      style={{width:"100%",background:T.bgInput,border:`1.5px solid ${T.border}`,borderRadius:8,fontSize:16,fontWeight:700,padding:"9px 10px",outline:"none",fontFamily:"inherit",color:T.text}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:T.textSub,letterSpacing:1,textTransform:"uppercase",marginBottom:4,fontWeight:600}}>Reps at that weight</div>
+                    <input type="number" inputMode="numeric" placeholder="e.g. 5" value={d.reps} onChange={e=>upd(ex,"reps",e.target.value)}
+                      style={{width:"100%",background:T.bgInput,border:`1.5px solid ${T.border}`,borderRadius:8,fontSize:16,fontWeight:700,padding:"9px 10px",outline:"none",fontFamily:"inherit",color:T.text}}/>
+                  </div>
+                </div>
+              </div>;
+            })}
+          </div>;
+        })}
+        {validationErr&&(
+          <div style={{background:"#ef444418",border:"1px solid #ef444440",borderRadius:T.r10,padding:"10px 14px",marginBottom:10,fontSize:12,color:"#ef4444",fontWeight:600}}>
+            ⚠️ {validationErr}
+          </div>
+        )}
+        {!showConfirm
+          ?<button onClick={()=>setShowConfirm(true)} style={{width:"100%",background:accent.push,border:"none",borderRadius:T.r16,padding:"16px",color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",marginBottom:12,fontFamily:"inherit"}}>
+            Recalculate Program from These Maxes
+          </button>
+          :<div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",marginBottom:12,border:`1.5px solid ${accent.push}`,boxShadow:T.shadow}}>
+            <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:6}}>⚠️ Confirm recalculation</div>
+            <div style={{fontSize:12,color:T.textSub,marginBottom:14,lineHeight:1.5}}>Recalculates all 20 weeks. Logged sets are not affected.</div>
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={()=>setShowConfirm(false)} style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",color:T.text}}>Cancel</button>
+              <button onClick={handleSubmit} style={{flex:2,background:accent.push,border:"none",borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>Yes, Recalculate</button>
+            </div>
+          </div>}
+        <div className="safe-bottom" style={{height:24}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── SETTINGS TAB ─────────────────────────────────────────────────────────────
+function SettingsTab({settings,onUpdate,onReset,onExport,onImport}){
+  const T=useTheme();
+  const accent=T.accent;
+  const [confirmReset,setConfirmReset]=useState(false);
+  const [resetDone,setResetDone]=useState(false);
+  const [importErr,setImportErr]=useState(null);
+  const [importOk,setImportOk]=useState(false);
+  const fileRef=useRef(null);
+
+  const handleReset=()=>{onReset();setConfirmReset(false);setResetDone(true);setTimeout(()=>setResetDone(false),3000);};
+
+  const handleFileImport=e=>{
+    const file=e.target.files?.[0];if(!file)return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const ok=onImport(ev.target.result);
+      if(ok){setImportOk(true);setImportErr(null);setTimeout(()=>setImportOk(false),3000);}
+      else{setImportErr("Invalid backup file — check it's a PPL Logger export.");setTimeout(()=>setImportErr(null),4000);}
+    };
+    reader.readAsText(file);
+    e.target.value="";
+  };
+
+  return(
+    <div className="tab-enter" style={{display:"flex",flexDirection:"column",height:"100%"}}>
+      <div className="safe-top" style={{background:T.bgHeader,padding:"0 18px 14px",borderBottom:`1px solid ${T.border}`,flexShrink:0}}>
+        <div style={{fontSize:22,fontWeight:800,color:T.text,paddingTop:14}}>Settings</div>
+      </div>
+      <div className="scroll" style={{flex:1,padding:"16px 14px 0"}}>
+
+        <div style={{fontSize:9,letterSpacing:3,color:T.textSub,marginBottom:8,textTransform:"uppercase",fontWeight:700}}>Appearance</div>
+        <div style={{background:T.bgCard,borderRadius:T.r16,overflow:"hidden",border:`1px solid ${T.border}`,boxShadow:T.shadow,marginBottom:20}}>
+          {[{id:"light",label:"☀️  Light Mode"},{id:"dark",label:"🌙  Dark Mode"}].map((m,idx)=>(
+            <button key={m.id} onClick={()=>onUpdate({mode:m.id})}
+              style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px",background:"transparent",border:"none",borderBottom:idx===0?`1px solid ${T.border}`:"none",cursor:"pointer",fontFamily:"inherit"}}>
+              <span style={{fontSize:15,color:T.text,fontWeight:500}}>{m.label}</span>
+              <div style={{width:22,height:22,borderRadius:"50%",border:`2px solid ${settings.mode===m.id?accent.acc:T.border}`,background:settings.mode===m.id?accent.acc:"transparent",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {settings.mode===m.id&&<div style={{width:8,height:8,borderRadius:"50%",background:"#fff"}}/>}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div style={{fontSize:9,letterSpacing:3,color:T.textSub,marginBottom:8,textTransform:"uppercase",fontWeight:700}}>Accent Colour</div>
+        <div style={{background:T.bgCard,borderRadius:T.r16,padding:"14px",border:`1px solid ${T.border}`,boxShadow:T.shadow,marginBottom:20}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {ACCENTS.map(a=>{
+              const active=settings.accent===a.id;
+              return <button key={a.id} onClick={()=>onUpdate({accent:a.id})}
+                style={{display:"flex",alignItems:"center",gap:10,padding:"12px",borderRadius:T.r10,border:`2px solid ${active?a.push:T.border}`,background:active?a.push+"15":T.bgInput,cursor:"pointer",textAlign:"left",fontFamily:"inherit"}}>
+                <div style={{display:"flex",gap:3,flexShrink:0}}>
+                  {[a.push,a.pull,a.legs].map((c,i)=><div key={i} style={{width:10,height:10,borderRadius:2,background:c}}/>)}
+                </div>
+                <span style={{fontSize:13,fontWeight:active?700:500,color:active?a.push:T.text}}>{a.label}</span>
+                {active&&<div style={{marginLeft:"auto",fontSize:12,color:a.push}}>✓</div>}
+              </button>;
+            })}
+          </div>
+        </div>
+
+        <div style={{fontSize:9,letterSpacing:3,color:T.textSub,marginBottom:8,textTransform:"uppercase",fontWeight:700}}>Preview</div>
+        <div style={{background:T.bgCard,borderRadius:T.r16,padding:"16px",border:`1px solid ${T.border}`,boxShadow:T.shadow,marginBottom:28}}>
+          <div style={{display:"flex",gap:8,marginBottom:12}}>
+            {[{l:"Push",c:accent.push},{l:"Pull",c:accent.pull},{l:"Legs",c:accent.legs}].map(x=>(
+              <div key={x.l} style={{flex:1,background:x.c+"22",border:`1.5px solid ${x.c}55`,borderRadius:T.r10,padding:"10px 6px",textAlign:"center"}}>
+                <div style={{fontSize:13,fontWeight:800,color:x.c}}>{x.l}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{display:"flex",gap:4}}>
+            {[{c:accent.vol,l:"Vol"},{c:accent.str,l:"Str"},{c:accent.dld,l:"Dld"},{c:accent.peak,l:"Peak"}].map(x=>(
+              <div key={x.l} style={{flex:1,height:24,borderRadius:6,background:x.c,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <span style={{fontSize:9,fontWeight:800,color:"#fff"}}>{x.l}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Data backup */}
+        <div style={{fontSize:9,letterSpacing:3,color:T.textSub,marginBottom:8,textTransform:"uppercase",fontWeight:700}}>Data & Backup</div>
+        <div style={{background:T.bgCard,borderRadius:T.r16,border:`1px solid ${T.border}`,boxShadow:T.shadow,overflow:"hidden",marginBottom:20}}>
+          <button onClick={onExport}
+            style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px",background:"transparent",border:"none",borderBottom:`1px solid ${T.border}`,cursor:"pointer",fontFamily:"inherit"}}>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontSize:15,fontWeight:600,color:T.text}}>Export Backup</div>
+              <div style={{fontSize:11,color:T.textSub,marginTop:2}}>Download all data as a JSON file</div>
+            </div>
+            <span style={{fontSize:18,flexShrink:0,marginLeft:8}}>⬇️</span>
+          </button>
+          <button onClick={()=>fileRef.current?.click()}
+            style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+            <div style={{textAlign:"left"}}>
+              <div style={{fontSize:15,fontWeight:600,color:T.text}}>Import Backup</div>
+              <div style={{fontSize:11,color:T.textSub,marginTop:2}}>Restore from a JSON backup file</div>
+            </div>
+            <span style={{fontSize:18,flexShrink:0,marginLeft:8}}>⬆️</span>
+          </button>
+          <input ref={fileRef} type="file" accept=".json" onChange={handleFileImport} style={{display:"none"}}/>
+        </div>
+        {importOk&&<div style={{background:"#34c75918",border:"1px solid #34c75940",borderRadius:T.r10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#34c759",fontWeight:600}}>✓ Backup restored successfully</div>}
+        {importErr&&<div style={{background:"#ef444418",border:"1px solid #ef444440",borderRadius:T.r10,padding:"10px 14px",marginBottom:12,fontSize:12,color:"#ef4444"}}>{importErr}</div>}
+
+        {/* Danger zone */}
+        <div style={{fontSize:9,letterSpacing:3,color:"#ef4444",marginBottom:8,textTransform:"uppercase",fontWeight:700}}>Danger Zone</div>
+        <div style={{background:T.bgCard,borderRadius:T.r16,border:`1px solid #ef444440`,boxShadow:T.shadow,overflow:"hidden",marginBottom:8}}>
+          {!confirmReset?(
+            <button onClick={()=>setConfirmReset(true)}
+              style={{width:"100%",display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px",background:"transparent",border:"none",cursor:"pointer",fontFamily:"inherit"}}>
+              <div style={{textAlign:"left"}}>
+                <div style={{fontSize:15,fontWeight:600,color:"#ef4444"}}>Reset Workout Log</div>
+                <div style={{fontSize:11,color:T.textSub,marginTop:2}}>Clears all logged sets, RPE data and week position</div>
+              </div>
+              <span style={{fontSize:18,color:"#ef4444",flexShrink:0,marginLeft:8}}>🗑</span>
+            </button>
+          ):(
+            <div style={{padding:"16px"}}>
+              <div style={{fontSize:13,fontWeight:700,color:"#ef4444",marginBottom:6}}>⚠️ Are you sure?</div>
+              <div style={{fontSize:12,color:T.textSub,marginBottom:6,lineHeight:1.5}}>This will permanently delete:</div>
+              <div style={{fontSize:12,color:"#ef4444",marginBottom:4}}>✗ All logged sets, weights and reps</div>
+              <div style={{fontSize:12,color:"#ef4444",marginBottom:4}}>✗ All RPE data and auto-regulated adjustments</div>
+              <div style={{fontSize:12,color:"#ef4444",marginBottom:14}}>✗ Week position (reset to Week 1)</div>
+              <div style={{fontSize:12,color:T.textSub,marginBottom:6,lineHeight:1.5}}>This will keep:</div>
+              <div style={{fontSize:12,color:"#34c759",marginBottom:4}}>✓ Your max weights and rep entries</div>
+              <div style={{fontSize:12,color:"#34c759",marginBottom:4}}>✓ Your calculated program weights</div>
+              <div style={{fontSize:12,color:"#34c759",marginBottom:16}}>✓ Your settings and colour preferences</div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={()=>setConfirmReset(false)}
+                  style={{flex:1,background:T.bgInput,border:`1px solid ${T.border}`,borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:600,cursor:"pointer",fontFamily:"inherit",color:T.text}}>
+                  Cancel
+                </button>
+                <button onClick={handleReset}
+                  style={{flex:1,background:"#ef4444",border:"none",borderRadius:T.r10,padding:"12px",fontSize:14,fontWeight:700,cursor:"pointer",color:"#fff",fontFamily:"inherit"}}>
+                  Yes, Reset
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {resetDone&&(
+          <div style={{background:"#34c75918",border:"1px solid #34c75940",borderRadius:T.r10,padding:"12px 14px",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:16}}>✓</span>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:"#34c759"}}>Log cleared</div>
+              <div style={{fontSize:11,color:T.textSub}}>Your maxes and program are intact. Starting fresh from Week 1.</div>
+            </div>
+          </div>
+        )}
+
+        <div className="safe-bottom" style={{height:24}}/>
+      </div>
+    </div>
+  );
+}
+
+// ─── SHARED ───────────────────────────────────────────────────────────────────
+function HalfCard({label,color,stats,onOpen,subtitle}){
+  const T=useTheme();
+  const done=stats.pct>=1;
+  return <button onClick={onOpen} style={{width:"100%",background:"transparent",border:"none",padding:"14px 12px",cursor:"pointer",textAlign:"left",display:"block"}}>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+      <div style={{fontSize:13,fontWeight:800,color,marginBottom:2,letterSpacing:0.3}}>{label}</div>
+      {done&&<span style={{fontSize:10,fontWeight:900,color}}>✓</span>}
+    </div>
+    {subtitle&&<div style={{fontSize:9,color:T.textSub,marginBottom:4}}>{subtitle}</div>}
+    <div style={{height:3,background:T.border,borderRadius:2,marginTop:6,overflow:"hidden"}}>
+      <div style={{height:"100%",width:`${stats.pct*100}%`,background:color,borderRadius:2,transition:"width 0.3s"}}/>
+    </div>
+    <div style={{fontSize:9,color:stats.done>0?color:T.textMuted,marginTop:5,fontWeight:600,letterSpacing:0.3}}>{stats.done}/{stats.total} sets</div>
+  </button>;
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
